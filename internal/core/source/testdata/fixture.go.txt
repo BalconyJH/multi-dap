@@ -1,0 +1,9 @@
+package main
+
+func helper(n int) int {
+	return n * 2
+}
+
+func main() {
+	println(helper(21))
+}
