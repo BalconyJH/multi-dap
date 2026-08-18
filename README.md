@@ -9,8 +9,8 @@ variables, memory — without the MULTI GUI.
 Target-agnostic: device file, connection title, target server arguments, core-to-ELF
 mapping, and source path rewriting all come from a project configuration file.
 
-**Status: design only. No implementation has started.** The architecture is frozen pending
-the M0 hardware reconnaissance described in
+**Status: architecture accepted; MULTI binding contract pending M0.** No implementation has
+started. Nine hardware reconnaissance blockers must be answered first — see
 [docs/architecture.md](docs/architecture.md) §12.
 
 ## Shape
