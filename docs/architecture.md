@@ -4,6 +4,7 @@
 No implementation has started.
 **Date:** 2026-08-18
 **Target:** Green Hills MULTI 7.1.6d (verified locally at `D:/ghs/multi_716d`)
+**DAP target:** 1.71.0 — the baseline for any future behavioral dispute
 
 The main structure is settled. What remains uncertain is what execution, stop-reason, and
 value-inspection primitives MULTI 7.1.6d can actually provide. M0 exists to establish that
@@ -51,9 +52,10 @@ be wrong on hardware, the affected section must be revisited.
 The absence of a callback API is why the event model in §8 has to be built rather than
 subscribed to.
 
-**Not yet verified:** whether execution primitives block until the next stop, what stop
-reason is observable, and how value inspection is structured. These are M0-8, M0-3/M0-9, and
-M0-4 respectively, and each can change this document.
+**Not yet verified:** whether execution primitives block until the next stop (M0-8), what
+stop reason is observable and whether a monotonic stop generation exists (M0-9), and how
+value inspection is structured (M0-4). Each can change this document; M0-9 additionally
+decides how far GUI coexistence can go (§6.8).
 
 ## 4. Architecture
 
@@ -186,14 +188,61 @@ second, independent control channel reserved for interruption and state queries,
 "one bridge connection" premise in §7 no longer holds. This is a branch in the architecture,
 not an implementation detail.
 
+#### Generation fencing
+
+A Go deadline stops the wait; it does not cancel the call. A stalled RPC can therefore
+return long after its connection was declared unhealthy and replaced. Every operation is
+fenced so that a result from a dead world cannot be accepted:
+
+```go
+type BridgeGeneration uint64
+type OperationID      uint64
+
+type Completion struct {
+    Generation BridgeGeneration
+    Operation  OperationID
+    Result     any
+    Err        error
+}
+```
+
+The actor discards any completion whose `Generation` is not the current one. The fence
+applies to **every** executor operation without exception — polls, state queries, breakpoint
+operations, and execution completions alike — because a late poll result is exactly as
+capable of corrupting the state machine as a late `Resume` completion.
+
+The same rule applies at the frontend boundary. A `FrontendGeneration` is bumped on every
+client attach, so an asynchronous completion belonging to a disconnected client is never
+delivered to the client that replaced it.
+
 ### 6.2 State machine and epochs
 
 Two monotonic counters, both **session-global**, not per-core (the freeze group starts and
 stops as a unit — see §6.7):
 
 ```go
-type ExecutionEpoch uint64  // incremented on every accepted execution start
-type StopEpoch      uint64  // incremented on every confirmed transition into Stopped
+type ExecutionEpoch uint64  // incremented on every confirmed Stopped → Running transition
+type StopEpoch      uint64  // incremented on every confirmed Running → Stopped transition
+```
+
+**Both counters are bound to observed target transitions, not to command acceptance.** The
+MULTI GUI can start execution without multi-dap issuing anything (§6.8); binding
+`ExecutionEpoch` to "an execution start we accepted" would let a GUI-initiated run pass
+through without advancing it, and the invariant below would then suppress a legitimate stop
+event. Sources of a confirmed transition are equivalent: a multi-dap resume or step
+completing, a poll observing that the target is running, or any future frontend's command.
+
+The state machine is symmetric:
+
+```
+                  ExecutionEpoch++
+                  drop stop-bound handles
+                  DAP continued
+   Stopped ─────────────────────────────────▶ Running
+      ▲                                          │
+      │            StopEpoch++                    │
+      │            DAP stopped                    │
+      └───────────────────────────────────────────┘
 ```
 
 `StopEpoch` gates handle validity (§6.4) and deduplicates stop events. A confirmed stop
@@ -202,9 +251,21 @@ poll result, a late hint — carries no new epoch and produces no event. Timesta
 debounce windows are not used.
 
 `ExecutionEpoch` carries one invariant: **a stop is canonical only if `ExecutionEpoch` has
-advanced since the previous canonical stop.** Without an intervening execution start there
-is nothing to stop from, so a second `stopped` cannot be emitted. It also tags every
-transition and emitted event for logs and replay.
+advanced since the previous canonical stop.** Without an intervening execution there is
+nothing to stop from, so a second `stopped` cannot be emitted. It also tags every transition
+and emitted event for logs and replay.
+
+#### Publishing resumption
+
+`Stopped → Running` is published, not merely recorded. When the GUI resumes the target there
+is no DAP `continue` request to respond to, so the only way the client learns that execution
+resumed is the `continued` event:
+
+```
+continued { threadId: <triggering core>, allThreadsContinued: true }
+```
+
+Stop-bound handles are dropped at the same moment (§6.4), before the event is emitted.
 
 ### 6.3 Stop arbiter: hints lower latency, state transitions are the truth
 
@@ -233,10 +294,39 @@ description, or a separate `stop_info` primitive provides it:
 ```
 
 **Correctness claim, stated precisely:** polling alone guarantees correct detection of
-execution state. Stop-reason fidelity may degrade when the hint channel is unavailable and
-MULTI cannot report a reason — in that case the adapter reports a conservative reason rather
-than fabricating one. The hint channel must never be required for the adapter to notice that
-the target stopped.
+execution state *for transitions multi-dap initiated*. Stop-reason fidelity may degrade when
+the hint channel is unavailable and MULTI cannot report a reason — in that case the adapter
+reports a conservative reason rather than fabricating one. The hint channel must never be
+required for the adapter to notice that the target stopped.
+
+#### The missed-cycle problem
+
+Polling compares against a cached state, so a complete execution cycle that begins and ends
+between two polls is invisible:
+
+```
+t=0 ms     cached state = Stopped
+t=20 ms    GUI step
+t=21 ms    Running
+t=25 ms    Stopped at the next line
+t=100 ms   poll → Stopped        ← indistinguishable from "never ran"
+```
+
+Nothing advances, no `continued` and no `stopped` are emitted, and stale frame handles are
+still considered valid while the target is in a different suspended state. Multi-dap's own
+commands are unaffected — it knows it resumed — so this is strictly a problem for
+externally-initiated execution.
+
+The only sound fix is an observable **stop generation**: a counter, sequence number, or
+equivalent field that changes on every stop, so that `Stopped(seq=51) → Stopped(seq=52)` is
+recognizable as a new suspended state even though the intervening `Running` was never
+sampled. Whether MULTI exposes one is M0-9, and the answer decides the GUI coexistence
+policy in §6.8.
+
+When a transition is discovered only after the fact this way, invalidation and publication
+happen at detection time: handles are dropped, `ExecutionEpoch` and `StopEpoch` both advance,
+and a `continued` followed by a `stopped` is emitted. The events are late but ordered and
+truthful; silently keeping stale handles alive is not an acceptable alternative.
 
 ### 6.4 Handle store
 
@@ -258,7 +348,9 @@ valid := state == Stopped && h.StopEpoch == currentStopEpoch
 ```
 
 On `Stopped → Running` every stop-bound handle is dropped immediately. A request naming an
-invalid handle is answered with a stale-reference error, never with data.
+invalid handle is answered with a stale-reference error, never with data. When the transition
+is only detected later (§6.3, missed cycle) the drop happens at detection time — late, but
+never silently skipped.
 
 **IDs are monotonic across the session; they are not reset per stop.** Restarting the
 allocator at 1 after each resume would make a stale reference from a racing client resolve
@@ -300,7 +392,7 @@ type LogicalBreakpoint struct {
 type PhysicalBreakpoint struct {
     Core        CoreID
     MULTIHandle string
-    HintToken   uint32   // generated by Go before bp_set
+    HintToken   uint32   // session-local unique; not a secret
     ActualLine  int
 }
 ```
@@ -315,7 +407,7 @@ MULTI handle is only known after creation. The identity carried over the hint ch
 therefore a Go-generated opaque token, never a MULTI handle:
 
 ```
-Go       token = 0x9F2C41A7   (random, unguessable)
+Go       token = 0x9F2C41A7   (session-local unique)
 bp_set   {file, line, hint_token}
 MULTI    b foo#12 {python -s "notify(0x9F2C41A7)"}
 bridge   → returns MULTIHandle
@@ -324,24 +416,29 @@ Go       token ↦ {core, MULTIHandle, logicalBreakpoint}
 
 The UDP datagram carries only the token. This closes the ordering problem, keeps DAP
 concepts out of the bridge, and removes any dependence on MULTI handles being globally
-unique.
+unique. The token is not a security mechanism — 32 bits is not unguessable — and does not
+need to be; authenticity comes from the per-session nonce of §7.6.
 
 #### Partial failure and divergent placement
 
-Two cases arise once one logical breakpoint spans multiple cores:
+A logical breakpoint is **atomic**: it exists on every expected core or on none.
 
 | Situation | Result |
 |---|---|
 | every expected core succeeds, all at the same actual line | `verified = true` |
-| any core's `bp_set` fails | `verified = false` + explanatory `message` |
-| cores resolve the request to different actual lines | `verified = false` + explanatory `message` |
+| any core's `bp_set` fails | successful physical breakpoints are rolled back; `verified = false` + explanatory `message` |
+| cores resolve the request to different actual lines | rolled back; `verified = false` + explanatory `message` |
 
 DAP can report only one actual location per breakpoint, so divergent placement cannot be
-represented honestly as verified.
+represented honestly as verified. Atomicity is chosen over best-effort because
+`verified = false` while a breakpoint is quietly live on one core is the more damaging
+outcome: the user is told nothing is set and the target stops anyway.
 
-**Ownership survives an unverified response.** Physical breakpoints that were successfully
-created are still recorded, so they can be rolled back or reconciled. A `verified = false`
-response must never cause multi-dap to forget breakpoints it created.
+**Rollback can itself fail**, and if `bp_clear` perturbs a running target (M0-7) it may not
+even be attemptable at that moment. In that case the physical breakpoint remains recorded
+with an `orphaned` marker, the condition is reported as a session fault, and removal is
+retried at the next natural stop. Ownership records are never discarded on failure — a
+`verified = false` response must never cause multi-dap to forget a breakpoint it created.
 
 #### Ownership and disconnect
 
@@ -439,19 +536,24 @@ reset, download, or delete breakpoints there at any time. The invariant is there
 the Session Actor is the sole *multi-dap* command owner, and target state is **observed**,
 never assumed.
 
-v1 policy:
+v1 policy, **conditional on M0-9**. Every supported entry below assumes MULTI exposes an
+observable stop generation (§6.3). Without one, externally-initiated execution that begins
+and completes between two polls is undetectable, and the policy degrades to the right-hand
+column:
 
-| GUI action while a DAP client is attached | Support |
-|---|---|
-| setting manual breakpoints | supported; multi-dap never touches them |
-| halt / resume / step | supported; reconciled by polling, surfaced as ordinary state transitions |
-| reset / download | unsupported; detected by reconciliation and reported as a session fault |
-| deleting a DAP-owned breakpoint | unsupported; detected by reconciliation and reported |
+| GUI action while a DAP client is attached | With stop generation | Without |
+|---|---|---|
+| setting manual breakpoints | supported; multi-dap never touches them | supported |
+| halt | supported; published as a normal transition | supported |
+| resume | supported; reconciled by polling | best-effort — a run that ends before the next poll is missed |
+| step | supported; each stop is a distinct generation | **unsupported while a DAP client is attached** |
+| reset / download | unsupported; detected by reconciliation and reported as a session fault | same |
+| deleting a DAP-owned breakpoint | unsupported; detected by reconciliation and reported | same |
 
 Reconciliation is a normal poll outcome, not an error path: a state change multi-dap did not
-initiate is still a real transition and is published as such. Actions marked unsupported
-invalidate assumptions the adapter cannot repair silently (downloaded image identity,
-breakpoint ownership), so they are reported rather than absorbed.
+initiate is still a real transition and is published as such (`continued`, then `stopped`).
+Actions marked unsupported invalidate assumptions the adapter cannot repair silently
+(downloaded image identity, breakpoint ownership), so they are reported rather than absorbed.
 
 ### 6.9 Control lease
 
@@ -465,6 +567,17 @@ type ControlLease struct {
 
 Mutating operations — resume, halt, step, breakpoint changes, memory writes, reset, download
 — require the lease. Read-only operations such as `status` and `doctor` do not.
+
+Acquisition and release are tied to the connection, not to a request:
+
+```
+attach accepted        → acquire the DAP lease atomically, before `initialized`
+disconnect request     → remove DAP-owned breakpoints → release
+socket closed / client crash → same cleanup path → release
+```
+
+The unexpected-close path is not optional. Handling only the `disconnect` request would let
+an IDE crash strand the lease, leaving the daemon permanently unusable by any other frontend.
 
 This exists because serialization alone does not prevent conflicting intent: an agent
 frontend resuming the target while a developer inspects variables at a stop is race-free and
@@ -635,7 +748,9 @@ the daemon is long-lived, the target may already be stopped when a client attach
 configuration must complete before any state is published:
 
 ```
-initialize
+initialize request
+   ↓
+initialize response (capabilities)
    ↓
 attach request (held pending)
    ↓
@@ -703,7 +818,10 @@ The bridge never retries. Retry and backoff policy live in Debugger Core.
 
 **Poisoned connections.** A Go deadline can stop waiting; it cannot cancel an in-flight
 MULTI-Python call. Once an RPC deadline expires, the bridge and its connection are marked
-unhealthy and must not be reused. What recovery is possible depends on M0-1:
+unhealthy, the `BridgeGeneration` is advanced, and the connection must not be reused. Every
+completion from the previous generation is discarded on arrival (§6.1) — a stalled call that
+returns minutes later must never be mistaken for a current result. What recovery is possible
+depends on M0-1:
 
 - if `mpythonrun` can attach to an existing MULTI session: kill the bridge, restart
   `mpythonrun`, reconnect to the live MULTI session, resynchronize state
@@ -723,6 +841,12 @@ This makes M0-1 a fault-recovery question, not merely a lifecycle question.
   group is excluded until M0-4 finalizes it (§7.3).
 - **Handle lifetime tests.** Explicit coverage that every stop-bound handle fails after a
   resume, and that a stale ID never resolves to a live object.
+- **Fencing tests.** A completion from a superseded `BridgeGeneration` or
+  `FrontendGeneration` must be discarded, including the case where it arrives after a
+  successful reconnect.
+- **Transition tests.** Externally-initiated transitions produce `continued` then `stopped`
+  in order; a missed cycle detected by stop generation produces the same pair late rather
+  than being dropped.
 - **On-board smoke.** One scripted pass: open → download → reset → breakpoint → stop →
   stack → eval → resume.
 - **CI invariants.** The layering checks of §5, the `run_commands` call-site restriction of
@@ -743,7 +867,7 @@ answered, because each can invalidate part of the architecture.**
 | 6 | `state()` polling: cost, blocking behavior, and — most important — **does it perturb the target?** If reading state requires halting a running core, polling destroys real-time behavior and "polling is the truth" collapses, leaving only the unreliable hint channel. **Highest-risk item.** | §6.3 entire event model |
 | 7 | Does `bp_clear` perturb a running target? | §9.3 disconnect contract |
 | 8 | **Execution primitive blocking semantics.** Do `Resume` / `step_*` return immediately after starting execution, or block until the target stops? While a `Resume()` is outstanding, can `Halt` / `state` be issued from another MULTI-Python context? | §6.1 actor/executor structure; possibly forces a second control channel |
-| 9 | **Stop-reason observability.** Can MULTI report *why* it stopped — reason, stopped core, breakpoint identity or address, exception/fault information — or only that it is stopped? | §6.3 stop arbiter and DAP `stopped` fidelity |
+| 9 | **Stop-reason and stop-generation observability.** Can MULTI report *why* it stopped — reason, stopped core, breakpoint identity or address, exception/fault information? And does it expose a monotonic stop generation, sequence, or equivalent field that changes on every stop, so that two consecutive `Stopped` samples with an unobserved run between them are distinguishable? | §6.3 stop arbiter and DAP `stopped` fidelity; **gates the GUI coexistence policy of §6.8** |
 
 **M1** — daemon, attach sequence (§9.2), `state`, `resume` / `halt`; a client connects and
 sees core state. Early in M1, validate DWARF scanning for the source index (§6.6).
@@ -778,9 +902,12 @@ packaging and distribution.
 | Session Actor as sole *command* owner, plus a single-flight Bridge Executor | Serializes all decisions in one place while keeping the actor responsive if execution primitives block | An actor that performs its own RPC; parallel `session` and `events` modules both holding state |
 | Target state is observed, never assumed; GUI coexistence policy | The MULTI GUI is an independent controller; claiming sole ownership of the target would be false the first time a user presses Resume there | "Session Actor owns the target" as an unqualified invariant |
 | Hints are hints; state transitions are the truth; dedup by epoch | Reliable across a silently dead hint channel; more robust than timestamps or debounce | Emitting `stopped` directly from a breakpoint notification |
+| Epochs bound to observed transitions, not to accepted commands | The GUI can start execution without multi-dap issuing anything; command-bound epochs would suppress legitimate events | `ExecutionEpoch` incremented on accepted execution start |
+| `continued` published symmetrically with `stopped` | A GUI-initiated resume has no DAP request to respond to, so the event is the only way the client learns execution resumed | Recording resumption internally and only publishing stops |
+| Every executor completion fenced by `BridgeGeneration` / `OperationID` | A deadline stops the wait but not the call; a stalled RPC returning after a bridge restart would otherwise be accepted as current | Treating a completion as valid because it matches an outstanding request |
+| Logical breakpoints are atomic across cores | `verified = false` while a breakpoint is quietly live on one core is the more damaging failure; ownership records survive so orphans can be retried | Best-effort partial breakpoints |
 | Handles invalid the moment execution resumes, keyed by session-global `StopEpoch`, with monotonic IDs | Matches DAP's suspended-state reference lifetime; monotonic IDs make stale references fail loudly instead of resolving to a different live object | Validity until the next stop; per-core epochs; resetting the ID allocator after each resume |
 | Go-generated opaque hint tokens | The command list needs an identity before MULTI assigns a handle; also keeps DAP concepts out of the bridge and avoids assuming MULTI handles are globally unique | Passing the MULTI breakpoint handle to the notifier |
-| Strict multi-core breakpoint verification | DAP can report one actual location; divergent placement or partial failure cannot honestly be reported as verified | Reporting verified when any core succeeded |
 | UDP loopback for hints, separate from control TCP, with a session nonce | Cannot stall MULTI's command loop; loss is acceptable because polling backstops; the nonce makes local hint floods non-free | Reusing the bridge's control connection for notifications |
 | Loopback-only binding as an architectural invariant | The bridge can resume, reset, and write memory; a DAP client has full debugger control | Treating listener exposure as a deployment concern |
 | Cores as DAP threads, single-thread execution advertised false | Honest about the freeze group instead of simulating per-core control | Pretending per-thread stepping works |
