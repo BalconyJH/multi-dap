@@ -1,0 +1,13 @@
+{
+  "multi_root": "C:/path/to/multi_716d",
+  "connection_args": "<target-server> -df=\"C:/path/to/device.dvf\" <target-flags>",
+  "multicore_project": "C:/path/to/project.ghsmc",
+  "primary_elf": "C:/path/to/primary.elf",
+  "cores": [
+    { "id": 0, "label": "primary", "elf": "C:/path/to/primary.elf" },
+    { "id": 1, "label": "secondary", "elf": "C:/path/to/secondary.elf" }
+  ],
+  "free_running_symbol": "<name of a global counter the firmware increments in its main loop>",
+  "breakpoint_site": { "file": "<source file name>", "line": 0 },
+  "hint_udp_port": 43111
+}
