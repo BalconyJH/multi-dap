@@ -2,3 +2,6 @@ recon/out/
 recon/config.local.json
 *.exe
 *.pyc
+
+# exploratory hardware capture; contains target symbol names
+.hwscratch/
