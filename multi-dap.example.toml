@@ -1,0 +1,57 @@
+[multi]
+installation = "C:/path/to/multi_716d"
+executable = "C:/path/to/multi_716d/mpythonrun.exe"
+
+[connection]
+project = "C:/path/to/project.ghsmc"
+arguments = "<target-server arguments>"
+# Optional: bind symbols to a program that is already present on the target.
+# This never downloads, flashes, resets, or verifies target memory.
+# Omit this field (or use "none") to perform no preparation action.
+preparation = "none"
+
+[[cores]]
+id = 0
+elf = "C:/path/to/core0.elf"
+
+[[cores]]
+id = 1
+elf = "C:/path/to/core1.elf"
+
+[inspection]
+# Optional. Select the core used for numeric-address Memory View and
+# disassembly requests. Omit for a single-core target; multi-core numeric
+# requests remain rejected as ambiguous unless this is set.
+default_core = 0
+
+[[source_rewrites]]
+from = "C:/build/source"
+to = "C:/workspace/source"
+
+[endpoints.mbp]
+host = "127.0.0.1"
+port = 0
+
+[endpoints.dap]
+host = "127.0.0.1"
+port = 0
+
+[endpoints.hint]
+host = "127.0.0.1"
+port = 0
+
+[timing]
+poll_cadence = "250ms"
+rpc_deadline = "3s"
+startup_deadline = "30s"
+
+[lifecycle]
+require_reset_after_download = true
+
+[probe]
+# Replace this with a globally unique identity for the exact project and
+# physical-probe binding. The supported CLion profile passes this complete TOML
+# through `proxy --config`; the daemon also binds the normalized configuration
+# semantics to its owner-only record. This ID still keys the record and physical
+# probe lock, and it is not the private control token.
+id = "replace-with-unique-project-probe-id"
