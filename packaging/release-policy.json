@@ -1,0 +1,6 @@
+{
+  "schema": "multi-dap.release-policy/v1",
+  "public_distribution_approved": true,
+  "license": "MIT",
+  "license_file_sha256": "a5b8dd3cebcfc445f6796b9d617e80f81e4ef2dca215ee79a9f553eec062365e"
+}
