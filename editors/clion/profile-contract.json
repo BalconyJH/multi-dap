@@ -1,0 +1,57 @@
+{
+  "schema_version": 8,
+  "client": "CLion",
+  "validated_version": "2026.2.1",
+  "validated_build": "262.9437.136",
+  "integration": "cidr-native-dap-cmake-debug",
+  "daemon_prerequisite": {
+    "command": [
+      "ensure",
+      "--config",
+      "<absolute-project.toml>",
+      "--bridge-script",
+      "<absolute-path-to-bridge.py>",
+      "--acquisition",
+      "cold"
+    ],
+    "program": "<absolute-path-to-multi-dap.exe>",
+    "working_directory": "<project-root>",
+    "lifetime": "synchronous-short-lived-explicit-cold-idempotent",
+    "satisfied_by": [
+      "CMake configuration Before Launch external tool",
+      "manual ensure before Debug"
+    ]
+  },
+  "cmake_configuration": {
+    "kind": "CMake Application",
+    "name_placeholder": "<your-cmake-application>",
+    "debug_profile": "multi-dap",
+    "activation": "Debug button only; never green Run"
+  },
+  "cidr_debug_profile": {
+    "kind": "DAP",
+    "name": "multi-dap",
+    "adapter_executable": "<absolute-path-to-multi-dap.exe>",
+    "adapter_arguments": [
+      "proxy",
+      "--config",
+      "<absolute-project.toml>"
+    ],
+    "configuration_binding": "validated-project-semantics-v1",
+    "communication": "stdin/stdout",
+    "launch_tab_json": {
+      "request": "attach"
+    },
+    "attach_tab": "not-used"
+  },
+  "forbidden": [
+    "Python Attach to DAP configuration",
+    "green Run",
+    "DAP profile Attach tab",
+    "TCP remote address",
+    "dynamic DAP port",
+    "unbound proxy --probe-id",
+    "target ELF as a Windows program",
+    "target connection arguments"
+  ]
+}
