@@ -1,0 +1,264 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Build candidate
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      distribution_approved: ${{ steps.release.outputs.distribution_approved }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Lint GitHub Actions workflows
+        run: go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Validate release tag
+        id: release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $pattern = '^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
+          if ($env:RELEASE_TAG -notmatch $pattern) {
+            throw "Release tag must be Semantic Versioning without build metadata: $env:RELEASE_TAG"
+          }
+          $version = $Matches[1]
+          if ($version.Contains('-')) {
+            foreach ($identifier in $version.Split('-', 2)[1].Split('.')) {
+              if ($identifier -match '^0[0-9]+$') {
+                throw "Numeric prerelease identifiers must not contain leading zeroes: $env:RELEASE_TAG"
+              }
+            }
+          }
+          $commit = (& git rev-parse "refs/tags/$env:RELEASE_TAG^{commit}").Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') {
+            throw 'Unable to resolve the requested tag commit.'
+          }
+          $headCommit = (& git rev-parse 'HEAD^{commit}').Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $headCommit -cne $commit) {
+            throw 'The checked-out revision does not resolve to the requested tag commit.'
+          }
+          $sourceDateEpoch = [long](& git show -s --format=%ct $commit)
+          if ($LASTEXITCODE -ne 0 -or $sourceDateEpoch -lt 315532800) {
+            throw 'Unable to derive a valid SOURCE_DATE_EPOCH from the tagged commit.'
+          }
+          $releasePolicy = Get-Content -LiteralPath .\packaging\release-policy.json -Raw | ConvertFrom-Json
+          if ($releasePolicy.schema -cne 'multi-dap.release-policy/v1' -or
+              $releasePolicy.public_distribution_approved -isnot [bool] -or
+              $releasePolicy.license -notmatch '^[A-Za-z0-9][A-Za-z0-9 .()+/_-]{1,127}$') {
+            throw 'packaging/release-policy.json is invalid.'
+          }
+          if ($releasePolicy.public_distribution_approved) {
+            if ($releasePolicy.license_file_sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
+              throw 'Approved public distribution requires a license_file_sha256.'
+            }
+            $rootLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath .\LICENSE).Hash
+            $packageLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath .\packaging\LICENSE.txt).Hash
+            if ($rootLicenseHash -cne $packageLicenseHash -or
+                $rootLicenseHash -cne $releasePolicy.license_file_sha256.ToUpperInvariant()) {
+              throw 'Approved release policy does not bind identical root and packaged license files.'
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+          "source_date_epoch=$sourceDateEpoch" >> $env:GITHUB_OUTPUT
+          "license=$($releasePolicy.license)" >> $env:GITHUB_OUTPUT
+          "distribution_approved=$($releasePolicy.public_distribution_approved.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      - name: Verify tagged commit is on the protected default branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)"
+          if [[ -z "$default_branch" ]] || ! git check-ref-format --branch "$default_branch" >/dev/null; then
+            echo 'GitHub returned an invalid default branch name.' >&2
+            exit 1
+          fi
+          encoded_default_branch="$(jq -rn --arg value "$default_branch" '$value | @uri')"
+          is_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded_default_branch" --jq .protected)"
+          if [[ "$is_protected" != 'true' ]]; then
+            echo "The default branch is not protected: $default_branch" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$default_branch"; then
+            echo 'The full-history checkout does not contain the default-branch reference.' >&2
+            exit 1
+          fi
+          branch_tip="$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded_default_branch" --jq .commit.sha)"
+          branch_tip="${branch_tip,,}"
+          if [[ ! "$branch_tip" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'GitHub did not return a valid default-branch commit.' >&2
+            exit 1
+          fi
+          checked_out_branch_tip="$(git rev-parse "refs/remotes/origin/$default_branch^{commit}")"
+          if [[ "$checked_out_branch_tip" != "$branch_tip" ]]; then
+            echo 'The checked-out default-branch reference does not match GitHub.' >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$RELEASE_COMMIT" "refs/remotes/origin/$default_branch"; then
+            echo "The tagged commit is not reachable from the protected default branch: $default_branch" >&2
+            exit 1
+          fi
+      - name: Prepare offline release dependencies
+        shell: pwsh
+        run: |
+          go mod download
+          uv python install 3.12
+      - name: Scan Go dependencies and call paths for known vulnerabilities
+        shell: pwsh
+        run: go run -mod=readonly golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Run full release acceptance
+        shell: pwsh
+        run: |
+          .\scripts\Invoke-WindowsReleaseAcceptance.ps1 `
+            -Mode Full `
+            -Version "${{ steps.release.outputs.version }}" `
+            -Commit "${{ steps.release.outputs.commit }}" `
+            -SourceDateEpoch ${{ steps.release.outputs.source_date_epoch }}
+      - name: Verify release acceptance did not modify source
+        shell: pwsh
+        run: |
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to inspect the checked-out source state.'
+          }
+          if ($changes.Count -ne 0) {
+            $changes
+            throw 'Release acceptance modified tracked or unignored source files.'
+          }
+      - name: Build release archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .\dist | Out-Null
+          .\scripts\New-WindowsPackage.ps1 `
+            -OutputDirectory .\dist `
+            -Version "${{ steps.release.outputs.version }}" `
+            -Commit "${{ steps.release.outputs.commit }}" `
+            -SourceDateEpoch ${{ steps.release.outputs.source_date_epoch }}
+      - name: Generate WinGet candidate manifests
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $version = '${{ steps.release.outputs.version }}'
+          $archiveName = "multi-dap-$version-windows-amd64.zip"
+          $archivePath = Join-Path .\dist $archiveName
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash
+          $url = "https://github.com/$env:REPOSITORY/releases/download/$env:RELEASE_TAG/$archiveName"
+          .\scripts\New-WinGetManifest.ps1 `
+            -Version $version `
+            -InstallerUrl $url `
+            -InstallerSha256 $hash `
+            -OutputDirectory .\dist\winget `
+            -Repository $env:REPOSITORY `
+            -License "${{ steps.release.outputs.license }}"
+      - name: Upload immutable candidate
+        if: ${{ github.event.repository.visibility != 'public' || steps.release.outputs.distribution_approved == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-${{ steps.release.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/winget/*.yaml
+          if-no-files-found: error
+          retention-days: 30
+      - name: Report withheld public artifacts
+        if: ${{ github.event.repository.visibility == 'public' && steps.release.outputs.distribution_approved != 'true' }}
+        shell: pwsh
+        run: Write-Output 'Release assets were validated but not uploaded because public distribution is not approved.'
+
+  attest:
+    name: Attest candidate
+    needs: candidate
+    if: ${{ github.event.repository.visibility == 'public' && needs.candidate.outputs.distribution_approved == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download immutable candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ needs.candidate.outputs.version }}
+          path: attest-subject
+      - name: Attest release archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            attest-subject/*.zip
+            attest-subject/*.sha256
+            attest-subject/winget/*.yaml
+
+  publish-draft:
+    name: Create draft GitHub release
+    needs: [candidate, attest]
+    if: ${{ always() && needs.candidate.result == 'success' && (github.event.repository.visibility != 'public' || needs.candidate.outputs.distribution_approved == 'true') && (needs.attest.result == 'success' || needs.attest.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download immutable candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ needs.candidate.outputs.version }}
+          path: release-assets
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          options=(--draft --generate-notes --title "multi-dap $RELEASE_TAG" --verify-tag)
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" \
+            release-assets/*.zip \
+            release-assets/*.sha256 \
+            release-assets/winget/*.yaml \
+            "${options[@]}"
