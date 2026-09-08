@@ -55,8 +55,10 @@
 package breakpoint
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -68,18 +70,33 @@ import (
 // Physical is one MULTI-side breakpoint backing a Logical breakpoint on one
 // core.
 type Physical struct {
+	Owner         Owner
 	Core          int
 	RequestedLine int
 	ActualLine    int
 	MULTIHandle   string
 	HintToken     uint32
-	Orphaned      bool
+
+	// PossiblyCommitted marks a recovery intent returned alongside Set's
+	// error. It means the backend confirmed the placement command, but could
+	// not establish its resulting handle or actual source line. Store must
+	// retain and clear this record by HintToken; callers must never discard it
+	// merely because Set returned an error.
+	PossiblyCommitted bool
+	Pending           bool
+	Orphaned          bool
 }
+
+// Owner is the frontend generation that placed a breakpoint. It is kept on
+// every physical record so a detached frontend can never clean a breakpoint
+// subsequently placed by another frontend.
+type Owner string
 
 // Logical is the DAP-facing breakpoint. It keeps one id regardless of how
 // many cores it maps to; hitBreakpointIds on the stop event reports which
 // Logical breakpoint fired (architecture.md 6.5).
 type Logical struct {
+	Owner    Owner
 	DAPID    int
 	Source   source.Identity
 	Line     int
@@ -135,12 +152,22 @@ type Plan struct {
 // cores, for the lifetime of one debug session. It performs no I/O; see the
 // package doc comment.
 type Store struct {
-	mu sync.Mutex
+	// transactionMu serializes physical target mutations. It is intentionally
+	// separate from mu: Set/Clear may block on MULTI, while hint lookup, status,
+	// and detach ownership transfer must remain responsive.
+	transactionMu sync.Mutex
+	mu            sync.Mutex
 
 	// bySource maps a source's canonical key to the Logical breakpoints this
 	// store currently believes are live on the target, keyed by requested
 	// line. This is the "current" side of Diff's replacement comparison.
 	bySource map[string]map[int]*Logical
+
+	// pending holds physical breakpoints from a detached frontend. They are
+	// only cleared after the actor has observed the target stopped; keeping
+	// them separate from bySource lets a replacement frontend own the same
+	// source line without inheriting the detached frontend's identity.
+	pending []Physical
 
 	// orphaned holds physical breakpoints whose removal could not be
 	// confirmed — see MarkOrphaned. They are no longer part of any tracked
@@ -151,14 +178,55 @@ type Store struct {
 	nextDAPID int
 
 	hintTokens map[uint32]bool
+
+	// liveHints is intentionally distinct from hintTokens. A token is never
+	// reissued during a session, but it is only resolvable while its physical
+	// breakpoint might still execute (including an orphan whose clear failed).
+	liveHints map[uint32]HintTarget
+
+	// cleanupOwners is a durable detach fence for frontend generations. A
+	// replacement that is already in flight may finish after RequestCleanup;
+	// the fence makes its commit transfer every surviving physical record to
+	// pending cleanup instead of resurrecting it as live ownership.
+	cleanupOwners map[Owner]bool
 }
 
 // NewStore returns an empty breakpoint store.
 func NewStore() *Store {
 	return &Store{
-		bySource:   map[string]map[int]*Logical{},
-		hintTokens: map[uint32]bool{},
+		bySource:      map[string]map[int]*Logical{},
+		hintTokens:    map[uint32]bool{},
+		liveHints:     map[uint32]HintTarget{},
+		cleanupOwners: map[Owner]bool{},
 	}
+}
+
+// HintTarget identifies the ownership record behind a live token. A zero
+// DAPID means an orphan from a failed transaction: it remains useful as a
+// wake-up hint but must not be reported as a verified breakpoint hit.
+type HintTarget struct {
+	DAPID int
+	Core  int
+}
+
+// LookupHint resolves a token only while its physical breakpoint is still
+// live or potentially live. It is safe for a UDP receiver's consumer to call
+// concurrently with replacement transactions.
+func (s *Store) LookupHint(token uint32) (HintTarget, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target, ok := s.liveHints[token]
+	return target, ok
+}
+
+// RetireHint marks a token as no longer able to cause a breakpoint command
+// list. The token remains issued and can never be reused, but late UDP
+// datagrams no longer trigger a state refresh. Call this after an externally
+// driven rollback has confirmed bp_clear.
+func (s *Store) RetireHint(token uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.liveHints, token)
 }
 
 // Diff compares the requested set of lines for src against the lines this
@@ -232,6 +300,7 @@ func (s *Store) Commit(plan Plan, results []PhysicalResult) ([]Logical, error) {
 
 	for _, p := range plan.Remove {
 		delete(bucket, p.RequestedLine)
+		delete(s.liveHints, p.HintToken)
 	}
 
 	grouped := make(map[int][]PhysicalResult, len(plan.Add))
@@ -294,6 +363,16 @@ func (s *Store) Commit(plan Plan, results []PhysicalResult) ([]Logical, error) {
 		// so DAPOwnedCount and future Diff calls stay consistent with what
 		// this store told the caller to attempt.
 		bucket[line] = &lg
+		for _, physical := range lg.Physical {
+			if physical.HintToken == 0 {
+				continue
+			}
+			target := HintTarget{Core: physical.Core}
+			if lg.Verified {
+				target.DAPID = lg.DAPID
+			}
+			s.liveHints[physical.HintToken] = target
+		}
 		out = append(out, lg)
 	}
 
@@ -350,8 +429,189 @@ func describeFailure(rs []PhysicalResult) string {
 func (s *Store) MarkOrphaned(p Physical) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p.Orphaned = true
-	s.orphaned = append(s.orphaned, p)
+	s.appendOrphanedLocked(p)
+}
+
+// RequestCleanup withdraws every live logical breakpoint owned by owner from
+// replacement semantics and retains its physical records as pending cleanup.
+// It performs no I/O. The actor must only execute Clear after a confirmed
+// stopped observation, never by halting a running target for housekeeping.
+func (s *Store) RequestCleanup(owner Owner) int {
+	n, _ := s.RequestCleanupSignal(owner)
+	return n
+}
+
+// RequestCleanupSignal is RequestCleanup with a second result that records a
+// newly installed detach fence even if an in-flight transaction has not yet
+// committed any physical record. The actor uses that signal to queue one
+// stopped-bound cleanup attempt behind the transaction.
+func (s *Store) RequestCleanupSignal(owner Owner) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if owner == "" {
+		return 0, false
+	}
+	newRequest := !s.cleanupOwners[owner]
+	s.cleanupOwners[owner] = true
+	n := 0
+	for key, bucket := range s.bySource {
+		for line, logical := range bucket {
+			if logical.Owner != owner {
+				continue
+			}
+			for _, physical := range logical.Physical {
+				s.appendPendingLocked(physical)
+				// A detached frontend's breakpoint can still fire while the
+				// target runs. Keep the token as a wake-up hint, but never
+				// attribute that stop to the replacement frontend.
+				if physical.HintToken != 0 {
+					s.liveHints[physical.HintToken] = HintTarget{Core: physical.Core}
+				}
+				n++
+			}
+			delete(bucket, line)
+		}
+		if len(bucket) == 0 {
+			delete(s.bySource, key)
+		}
+	}
+	// A previous setBreakpoints transaction can already have produced an
+	// orphan for this owner. Detaching while stopped must schedule that retry
+	// too, even though there is no longer a live logical record to move.
+	for _, physical := range s.orphaned {
+		if physical.Owner == owner {
+			n++
+		}
+	}
+	return n, newRequest
+}
+
+// CleanupResult reports the retained evidence after a stopped-bound cleanup
+// pass. A failed Clear becomes orphaned and remains eligible for a later
+// stopped-bound retry; no result is ever silently discarded.
+type CleanupResult struct {
+	Cleared  int
+	Pending  int
+	Orphaned int
+}
+
+// CleanupPending tries every detached or orphaned DAP-owned physical
+// breakpoint. Calls must be made only after a confirmed stopped observation.
+// The store serializes the physical cleanup transaction with replacement, but
+// does not hold its state lock during Clear. It is deliberately best-effort
+// per physical breakpoint: a failed clear is preserved as an orphan, while
+// successful clears retire only their own hint token.
+func (s *Store) CleanupPending(ctx context.Context, placer Placer) (CleanupResult, error) {
+	if placer == nil {
+		return CleanupResult{}, errors.New("breakpoint: placer is required")
+	}
+	s.transactionMu.Lock()
+	defer s.transactionMu.Unlock()
+
+	s.mu.Lock()
+	cleanup := append(append([]Physical(nil), s.pending...), s.orphaned...)
+	s.mu.Unlock()
+
+	cleared := make([]Physical, 0, len(cleanup))
+	failed := make([]Physical, 0, len(cleanup))
+	for _, physical := range cleanup {
+		if err := placer.Clear(ctx, physical); err != nil {
+			failed = append(failed, physical)
+			continue
+		}
+		cleared = append(cleared, physical)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, physical := range cleared {
+		s.removePhysicalEvidenceLocked(physical)
+	}
+	for _, physical := range failed {
+		s.movePendingToOrphanedLocked(physical)
+	}
+	result := CleanupResult{Cleared: len(cleared), Pending: len(s.pending), Orphaned: len(s.orphaned)}
+	return result, nil
+}
+
+func (s *Store) appendPendingLocked(physical Physical) {
+	if s.hasPhysicalLocked(s.pending, physical) || s.hasPhysicalLocked(s.orphaned, physical) {
+		return
+	}
+	physical.Pending, physical.Orphaned = true, false
+	s.pending = append(s.pending, physical)
+	if physical.HintToken != 0 {
+		s.liveHints[physical.HintToken] = HintTarget{Core: physical.Core}
+	}
+}
+
+func (s *Store) appendOrphanedLocked(physical Physical) {
+	if s.hasPhysicalLocked(s.orphaned, physical) {
+		return
+	}
+	physical.Pending, physical.Orphaned = false, true
+	s.removePhysicalFromSliceLocked(&s.pending, physical)
+	s.orphaned = append(s.orphaned, physical)
+	if physical.HintToken != 0 {
+		s.liveHints[physical.HintToken] = HintTarget{Core: physical.Core}
+	}
+}
+
+func (s *Store) movePendingToOrphanedLocked(physical Physical) {
+	if s.hasPhysicalLocked(s.orphaned, physical) {
+		return
+	}
+	if s.removePhysicalFromSliceLocked(&s.pending, physical) {
+		s.appendOrphanedLocked(physical)
+	}
+}
+
+func (s *Store) removePhysicalEvidenceLocked(physical Physical) {
+	s.removePhysicalFromSliceLocked(&s.pending, physical)
+	s.removePhysicalFromSliceLocked(&s.orphaned, physical)
+	if physical.HintToken != 0 {
+		delete(s.liveHints, physical.HintToken)
+	}
+}
+
+func (s *Store) hasPhysicalLocked(values []Physical, physical Physical) bool {
+	for _, value := range values {
+		if samePhysical(value, physical) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) removePhysicalFromSliceLocked(values *[]Physical, physical Physical) bool {
+	for index, value := range *values {
+		if samePhysical(value, physical) {
+			*values = append((*values)[:index], (*values)[index+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func samePhysical(a, b Physical) bool {
+	if a.HintToken != 0 || b.HintToken != 0 {
+		return a.HintToken == b.HintToken
+	}
+	return a.Owner == b.Owner && a.Core == b.Core && a.RequestedLine == b.RequestedLine && a.MULTIHandle == b.MULTIHandle
+}
+
+// PendingCount and OrphanCount expose ownership evidence for the daemon
+// status surface without exposing individual MULTI handles.
+func (s *Store) PendingCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.pending)
+}
+
+func (s *Store) OrphanCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.orphaned)
 }
 
 // DAPOwnedCount returns the number of physical breakpoints multi-dap
@@ -370,6 +630,7 @@ func (s *Store) DAPOwnedCount() int {
 		}
 	}
 	n += len(s.orphaned)
+	n += len(s.pending)
 	return n
 }
 
@@ -384,7 +645,10 @@ func (s *Store) DAPOwnedCount() int {
 func (s *Store) NewHintToken() uint32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.newHintTokenLocked()
+}
 
+func (s *Store) newHintTokenLocked() uint32 {
 	for {
 		var buf [4]byte
 		if _, err := rand.Read(buf[:]); err != nil {
