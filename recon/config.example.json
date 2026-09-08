@@ -1,5 +1,6 @@
 {
   "multi_root": "C:/path/to/multi_716d",
+  "service_router_port": 0,
   "connection_args": "<target-server> -df=\"C:/path/to/device.dvf\" <target-flags>",
   "multicore_project": "C:/path/to/project.ghsmc",
   "primary_elf": "C:/path/to/primary.elf",
@@ -8,6 +9,42 @@
     { "id": 1, "label": "secondary", "elf": "C:/path/to/secondary.elf" }
   ],
   "free_running_symbol": "<name of a global counter the firmware increments in its main loop>",
+  "poll_window_seconds": 3.0,
   "breakpoint_site": { "file": "<source file name>", "line": 0 },
-  "hint_udp_port": 43111
+  "hint_udp_port": 43111,
+  "m4_execution_probe": {
+    "enabled": false,
+    "acknowledgement": "",
+    "step_out": { "method": "", "args": [] },
+    "run_to": { "method": "", "args": [] }
+  },
+  "m5_read_probe": {
+    "enabled": false,
+    "acknowledgement": "",
+    "memory": { "method": "", "args": [] },
+    "disassembly": { "method": "", "args": [] }
+  },
+  "m2_program_breakpoint_probe": {
+    "enabled": false,
+    "acknowledgement": "",
+    "exclusive_control_acknowledgement": ""
+  },
+  "m2_owned_breakpoint_recovery_probe": {
+    "enabled": false,
+    "acknowledgement": "",
+    "exclusive_control_acknowledgement": "",
+    "legacy_production_token_recovery": false,
+    "expected_configured_core_ordinal": null,
+    "expected_exact_token_count": 0
+  },
+  "p14_execution_domain_probe": {
+    "enabled": false,
+    "acknowledgement": "",
+    "exclusive_control_acknowledgement": "",
+    "selected_core_ordinal": null,
+    "single_step_enabled": false,
+    "single_step_acknowledgement": "",
+    "step_poll_max_attempts": 20,
+    "step_poll_interval_seconds": 0.05
+  }
 }

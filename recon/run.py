@@ -14,14 +14,52 @@ import time
 
 RECON = os.path.dirname(os.path.abspath(__file__))
 CREATE_NEW_CONSOLE = 0x00000010
+WARM_ONLY_PROBES = ("p00e_warm_bind",
+                    "p02_socket",
+                    "p03_m2_source_known",
+                    "p04_m4_execution",
+                    "p05_m5_inspection",
+                    "p06_poll",
+                    "p07_bpclear",
+                    "p08_routed_processes",
+                    "p09_m2_program_breakpoint",
+                    "p10_per_core_warm_inventory",
+                    "p11_m2_owned_breakpoint_recovery",
+                    "p12_m2_source_files",
+                    "p13_execution_domain_syntax",
+                    "p14_execution_domain_experiment",
+                    "p15_warm_registry_health")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("probe", help="probe stem, e.g. p06_poll")
     ap.add_argument("--timeout", type=float, default=600.0)
-    ap.add_argument("rest", nargs=argparse.REMAINDER)
-    args = ap.parse_args()
+    ap.add_argument(
+        "--service-router-port",
+        type=int,
+        default=None,
+        help="override the ignored configuration's live service-router port",
+    )
+    ap.add_argument(
+        "--cold",
+        action="store_true",
+        help="do not join the configured live service router",
+    )
+    args, rest = ap.parse_known_args()
+    if args.cold and args.service_router_port is not None:
+        ap.error("--cold and --service-router-port are mutually exclusive")
+    if args.probe in WARM_ONLY_PROBES and args.cold:
+        ap.error("%s is warm-only and rejects --cold" % args.probe)
+    if (args.probe in ("p09_m2_program_breakpoint",
+                       "p11_m2_owned_breakpoint_recovery",
+                       "p14_execution_domain_experiment") and
+            args.service_router_port is None):
+        ap.error("%s requires explicit --service-router-port" % args.probe)
+    if args.service_router_port is not None and not 1 <= args.service_router_port <= 65535:
+        ap.error("--service-router-port must be in 1..65535")
+    if rest and rest[0] == "--":
+        rest = rest[1:]
 
     cfg_path = os.path.join(RECON, "config.local.json")
     if not os.path.exists(cfg_path):
@@ -38,9 +76,28 @@ def main():
         os.remove(out)
 
     exe = os.path.join(cfg["multi_root"], "mpythonrun.exe")
-    cmd = [exe, "-f", script]
-    if args.rest:
-        cmd += ["-args"] + [a for a in args.rest if a != "--"]
+    cmd = [exe]
+    configured_router_port = int(cfg.get("service_router_port", 0) or 0)
+    service_router_port = (
+        0
+        if args.cold
+        else args.service_router_port
+        if args.service_router_port is not None
+        else configured_router_port
+    )
+    if args.probe in WARM_ONLY_PROBES and not service_router_port:
+        ap.error("%s requires a live service-router port" % args.probe)
+    if service_router_port:
+        cmd += ["-sr_connect_servicerouter_host", "127.0.0.1",
+                "-sr_connect_servicerouter_port", str(service_router_port)]
+    cmd += ["-f", script]
+    probe_args = list(rest)
+    if args.probe in ("p09_m2_program_breakpoint",
+                      "p11_m2_owned_breakpoint_recovery",
+                      "p14_execution_domain_experiment"):
+        probe_args += ["--live-router-port", str(args.service_router_port)]
+    if probe_args:
+        cmd += ["-args"] + probe_args
 
     started = time.time()
     proc = subprocess.Popen(cmd, cwd=RECON, creationflags=CREATE_NEW_CONSOLE)
@@ -48,6 +105,7 @@ def main():
         proc.wait(timeout=args.timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
+        proc.wait(timeout=5.0)
         print("TIMEOUT after %.1fs - probe killed" % (time.time() - started))
 
     if not os.path.exists(out):
