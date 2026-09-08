@@ -1,0 +1,9 @@
+* @Tacrolimus
+
+/.github/workflows/ @Tacrolimus
+/packaging/ @Tacrolimus
+/scripts/ @Tacrolimus
+/internal/bridge/ @Tacrolimus
+/internal/control/ @Tacrolimus
+/internal/daemon/ @Tacrolimus
+/internal/dap/ @Tacrolimus
