@@ -1,0 +1,214 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $unformatted = @(gofmt -l .)
+          if ($unformatted.Count -ne 0) {
+            $unformatted
+            throw 'Go files are not formatted.'
+          }
+      - name: Run unit and integration tests
+        run: go test -mod=readonly -count=1 ./...
+      - name: Run vet
+        run: go vet -mod=readonly ./...
+      - name: Run race tests
+        run: go test -mod=readonly -race ./...
+      - name: Compile all commands
+        run: go build -mod=readonly -trimpath -buildvcs=false ./...
+
+  python-host:
+    name: Python host tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - name: Install host-test Python
+        run: uv python install 3.12
+      - name: Test the MULTI bridge host surface
+        run: uv run --no-project --no-python-downloads --python 3.12 -m unittest bridge.test_bridge
+      - name: Test the reconnaissance host surface
+        run: uv run --no-project --no-python-downloads --python 3.12 -m unittest discover -s recon/tests
+
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm test
+      - run: npm run lint
+      - run: npm run package-contents
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - name: Build strict documentation
+        run: uv run --project docs --locked --python 3.12 zensical build --clean --strict
+      - name: Test repository policy validators
+        run: >-
+          uv run --offline --no-python-downloads --no-project --python 3.12
+          -m unittest tools.test_validate_repository_language
+          tools.test_validate_release_changelog
+      - name: Enforce English repository text
+        run: >-
+          uv run --offline --no-python-downloads --no-project --python 3.12
+          -m tools.validate_repository_language --repository .
+
+  go-vulnerability-audit:
+    name: Go vulnerability audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Scan Go dependencies and call paths for known vulnerabilities
+        run: go run -mod=readonly golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+  workflow-policy:
+    name: GitHub Actions policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Lint GitHub Actions workflows
+        run: go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  package:
+    name: Windows release candidate
+    needs: [go, python-host, vscode, docs, go-vulnerability-audit, workflow-policy]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Prepare offline release dependencies
+        shell: pwsh
+        run: |
+          go mod download
+          uv python install 3.12
+      - name: Run full release acceptance
+        shell: pwsh
+        run: |
+          .\scripts\Invoke-WindowsReleaseAcceptance.ps1 `
+            -Mode Full `
+            -Version "0.0.0-ci.${{ github.run_number }}" `
+            -Commit "${{ github.sha }}" `
+            -SourceDateEpoch 315532800
+      - name: Verify release acceptance did not modify source
+        shell: pwsh
+        run: |
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to inspect the checked-out source state.'
+          }
+          if ($changes.Count -ne 0) {
+            $changes
+            throw 'Release acceptance modified tracked or unignored source files.'
+          }
+      - name: Build candidate archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .\dist | Out-Null
+          .\scripts\New-WindowsPackage.ps1 `
+            -OutputDirectory .\dist `
+            -Version "0.0.0-ci.${{ github.run_number }}" `
+            -Commit "${{ github.sha }}" `
+            -SourceDateEpoch 315532800
