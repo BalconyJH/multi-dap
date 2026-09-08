@@ -8,6 +8,7 @@
 package source
 
 import (
+	"errors"
 	"path"
 	"strings"
 )
@@ -39,4 +40,17 @@ func Canonicalize(p string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
 	p = path.Clean(p)
 	return strings.ToLower(p)
+}
+
+// ValidateTargetIdentity prevents membership for one debug path from being
+// used to place a breakpoint through another. ClientPath is deliberately not
+// part of the target-facing identity.
+func ValidateTargetIdentity(identity Identity) error {
+	if identity.Key == "" || identity.DebugPath == "" {
+		return errors.New("source identity requires key and debug path")
+	}
+	if Canonicalize(identity.DebugPath) != identity.Key {
+		return errors.New("source identity key and debug path differ")
+	}
+	return nil
 }
