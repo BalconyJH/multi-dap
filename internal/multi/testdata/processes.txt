@@ -1,0 +1,4 @@
+     # PID        PPID       Status        CBEFITDHR Name and Arguments
+>>   0 0x2a       N/A        Stopped       011111101 X:/fixture/bin/alpha.elf
+     1 0x2b       N/A        Stopped       011111101 X:/fixture/bin/beta.elf
+   250 0x2c       N/A        Running       011111101

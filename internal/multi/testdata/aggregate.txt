@@ -1,0 +1,82 @@
+volatile struct FixtureAggregate_t {
+    sampleTag = 101;
+    revision = 0;
+    itemCount = 0;
+    totalSize = 0;
+    spares[0] = 202;
+    spares[1] = 0;
+    spares[2] = 0;
+    spares[3] = 0;
+    items[0] =      0x20 volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 0;
+        timeout = 101;
+        lastTimestamp = 0;
+        errorCount = 0;
+    };
+    items[1] =      0x3c volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 303;
+        priority = 0;
+        bufferSize = 0;
+        timeout = 0;
+        lastTimestamp = 404;
+        errorCount = 0;
+    };
+    items[2] =      0x58 volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 128;
+        bufferSize = 0;
+        timeout = 0;
+        lastTimestamp = 0;
+        errorCount = 0;
+    };
+    items[3] =      0x74 volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 505;
+        timeout = 0;
+        lastTimestamp = 0;
+        errorCount = 0;
+    };
+    items[4] =      0x90 volatile struct FixtureItem_t {
+        state = 606 (not defined for enum );
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 0;
+        timeout = 707;
+        lastTimestamp = 0;
+        errorCount = 0;
+    };
+    items[5] =      0xac volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 0;
+        timeout = 0;
+        lastTimestamp = 0;
+        errorCount = 808;
+    };
+    items[6] =      0xc8 volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 0;
+        timeout = 0;
+        lastTimestamp = 0;
+        errorCount = 909;
+    };
+    items[7] =      0xe4 volatile struct FixtureItem_t {
+        state = FixtureState_IDLE (0);
+        messageSize = 0;
+        priority = 0;
+        bufferSize = 1001;
+        timeout = 0;
+        lastTimestamp = 0;
+        errorCount = 0;
+    };
+}

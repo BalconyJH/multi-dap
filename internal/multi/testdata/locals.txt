@@ -1,0 +1,4 @@
+fixture_uninitialized = 17 << Not Initialized >>
+fixture_dead_count = 424242 << Dead >>
+fixture_dead_state = 31337 (not defined for enum ) << Dead >>
+fixture_frame_only = 7	*** Caution: variable is hidden or out of scope ***

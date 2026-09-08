@@ -1,0 +1,3 @@
+ 0          fixture#2:	0x00c0ffee AT count: 1 reached=1
+ 1          fixture#61:	0x00c0ff10 AT count: 1   <{mprintf("HIT fixture\n")}>
+ 2          fixture#62:	0x00c0ff12 AT count: 1 (inactive)
