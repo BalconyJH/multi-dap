@@ -1,0 +1,20 @@
+* text=auto
+
+*.go text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+LICENSE text eol=lf
+packaging/LICENSE.txt text eol=lf
+third_party/**/LICENSE text eol=lf
+
+*.elf binary
+*.exe binary
+*.pyc binary
+*.zip binary
