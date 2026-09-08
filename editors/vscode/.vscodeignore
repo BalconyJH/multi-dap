@@ -1,0 +1,8 @@
+.gitignore
+.vscodeignore
+test/**
+scripts/**
+*.vsix
+*.tgz
+npm-debug.log*
+node_modules/**
