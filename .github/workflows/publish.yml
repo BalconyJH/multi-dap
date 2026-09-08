@@ -1,0 +1,360 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag to publish (for example v0.1.0)
+        required: true
+        type: string
+      confirm:
+        description: Enter the same tag again to confirm public publication
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - name: Validate requested tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          CONFIRM_TAG: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" != "$CONFIRM_TAG" ]]; then
+            echo 'Confirmation must exactly match the requested release tag.' >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          if [[ "$version" == *-* ]]; then
+            prerelease="${version#*-}"
+            IFS='.' read -ra identifiers <<< "$prerelease"
+            for identifier in "${identifiers[@]}"; do
+              if [[ "$identifier" =~ ^0[0-9]+$ ]]; then
+                echo "Numeric prerelease identifiers must not contain leading zeroes: $RELEASE_TAG" >&2
+                exit 1
+              fi
+            done
+          fi
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce publication license and source ancestry gates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! cmp -s LICENSE packaging/LICENSE.txt; then
+            echo 'Root and packaged license files must be identical before publication.' >&2
+            exit 1
+          fi
+          if ! jq -e '
+              .schema == "multi-dap.release-policy/v1" and
+              .public_distribution_approved == true and
+              (.license | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9 .()+/_-]{1,127}$")) and
+              (.license_file_sha256 | type == "string" and test("^[0-9a-fA-F]{64}$"))
+            ' packaging/release-policy.json > /dev/null; then
+            echo 'Public distribution has not been positively approved in release-policy.json.' >&2
+            exit 1
+          fi
+          expected_license_hash="$(jq -r .license_file_sha256 packaging/release-policy.json | tr 'A-F' 'a-f')"
+          actual_license_hash="$(sha256sum LICENSE | cut -d ' ' -f 1)"
+          if [[ "$actual_license_hash" != "$expected_license_hash" ]]; then
+            echo 'LICENSE does not match the explicitly approved release-policy digest.' >&2
+            exit 1
+          fi
+          release_license="$(jq -r .license packaging/release-policy.json)"
+          release_commit="$(git rev-parse 'HEAD^{commit}')"
+          requested_tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          if [[ "$release_commit" != "$requested_tag_commit" ]]; then
+            echo 'The checked-out revision does not resolve to the requested tag commit.' >&2
+            exit 1
+          fi
+          default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)"
+          if [[ -z "$default_branch" ]] || ! git check-ref-format --branch "$default_branch" >/dev/null; then
+            echo 'GitHub returned an invalid default branch name.' >&2
+            exit 1
+          fi
+          encoded_default_branch="$(jq -rn --arg value "$default_branch" '$value | @uri')"
+          is_protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded_default_branch" --jq .protected)"
+          if [[ "$is_protected" != 'true' ]]; then
+            echo "The default branch is not protected: $default_branch" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$default_branch"; then
+            echo 'The full-history checkout does not contain the default-branch reference.' >&2
+            exit 1
+          fi
+          branch_tip="$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded_default_branch" --jq .commit.sha)"
+          branch_tip="${branch_tip,,}"
+          if [[ ! "$branch_tip" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'GitHub did not return a valid default-branch commit.' >&2
+            exit 1
+          fi
+          checked_out_branch_tip="$(git rev-parse "refs/remotes/origin/$default_branch^{commit}")"
+          if [[ "$checked_out_branch_tip" != "$branch_tip" ]]; then
+            echo 'The checked-out default-branch reference does not match GitHub.' >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$release_commit" "refs/remotes/origin/$default_branch"; then
+            echo "The tagged commit is not reachable from the protected default branch: $default_branch" >&2
+            exit 1
+          fi
+          source_date_epoch="$(git show -s --format=%ct "$release_commit")"
+          printf 'RELEASE_COMMIT=%s\n' "$release_commit" >> "$GITHUB_ENV"
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch" >> "$GITHUB_ENV"
+          printf 'RELEASE_LICENSE=%s\n' "$release_license" >> "$GITHUB_ENV"
+      - name: Inspect and download draft assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+          if [[ "$is_draft" != 'true' ]]; then
+            echo "Release $RELEASE_TAG is not an unpublished draft." >&2
+            exit 1
+          fi
+          visibility="$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)"
+          if [[ "$visibility" != 'public' ]]; then
+            echo 'Public release publication requires a public source repository and public attestation.' >&2
+            exit 1
+          fi
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" --dir release-assets
+          version="${RELEASE_TAG#v}"
+          archive_name="multi-dap-${version}-windows-amd64.zip"
+          expected_assets=(
+            'Tacrolimus.multi-dap.installer.yaml'
+            'Tacrolimus.multi-dap.locale.en-US.yaml'
+            'Tacrolimus.multi-dap.yaml'
+            "$archive_name"
+            "$archive_name.sha256"
+          )
+          mapfile -t actual_assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort) \
+            <(printf '%s\n' "${actual_assets[@]}"); then
+            echo 'Draft release assets do not match the exact publication allowlist.' >&2
+            exit 1
+          fi
+          archive_hash="$(sha256sum "release-assets/$archive_name" | cut -d ' ' -f 1)"
+          checksum_line="$(cat "release-assets/$archive_name.sha256")"
+          if [[ "$(wc -l < "release-assets/$archive_name.sha256")" -ne 1 ||
+                "$checksum_line" != "$archive_hash  $archive_name" ]]; then
+            echo 'Detached checksum must contain exactly the expected archive digest and name.' >&2
+            exit 1
+          fi
+          (cd release-assets && sha256sum --check "$archive_name.sha256")
+          expected_entries=(
+            'LICENSE.txt'
+            'README.md'
+            'SHA256SUMS.txt'
+            'THIRD_PARTY_NOTICES.md'
+            'bridge/bridge.py'
+            'editors/clion/README.md'
+            'editors/clion/profile-contract.json'
+            'examples/multi-dap.example.toml'
+            'licenses/Go.txt'
+            'licenses/go-toml.txt'
+            'multi-dap.exe'
+            'release-provenance.json'
+          )
+          mapfile -t actual_entries < <(unzip -Z1 "release-assets/$archive_name" | LC_ALL=C sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected_entries[@]}" | LC_ALL=C sort) \
+            <(printf '%s\n' "${actual_entries[@]}"); then
+            echo 'Release archive entries do not match the exact payload allowlist.' >&2
+            exit 1
+          fi
+          mkdir extracted
+          unzip -q "release-assets/$archive_name" -d extracted
+          (cd extracted && sha256sum --check SHA256SUMS.txt)
+          cmp LICENSE extracted/LICENSE.txt
+          cmp packaging/README.md extracted/README.md
+          cmp THIRD_PARTY_NOTICES.md extracted/THIRD_PARTY_NOTICES.md
+          cmp bridge/bridge.py extracted/bridge/bridge.py
+          cmp editors/clion/README.md extracted/editors/clion/README.md
+          cmp editors/clion/profile-contract.json extracted/editors/clion/profile-contract.json
+          cmp multi-dap.example.toml extracted/examples/multi-dap.example.toml
+          cmp third_party/go/LICENSE extracted/licenses/Go.txt
+          cmp third_party/go-toml/LICENSE extracted/licenses/go-toml.txt
+          binary_hash="$(sha256sum extracted/multi-dap.exe | cut -d ' ' -f 1)"
+          binary_size="$(stat --format=%s extracted/multi-dap.exe)"
+          jq -e \
+            --arg version "$version" \
+            --arg commit "$RELEASE_COMMIT" \
+            --arg binary_hash "$binary_hash" \
+            --argjson epoch "$SOURCE_DATE_EPOCH" \
+            --argjson binary_size "$binary_size" \
+            '.schema == "multi-dap.release-provenance/v1" and
+             .package == "multi-dap" and
+             .version == $version and
+             .commit == $commit and
+             .source_date_epoch == $epoch and
+             .target.os == "windows" and
+             .target.architecture == "amd64" and
+             .binary.path == "multi-dap.exe" and
+             .binary.sha256 == $binary_hash and
+             .binary.size == $binary_size' \
+            extracted/release-provenance.json > /dev/null
+          expected_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$archive_name"
+          grep -Fx "PackageVersion: $version" release-assets/Tacrolimus.multi-dap.yaml
+          grep -Fx "PackageVersion: $version" release-assets/Tacrolimus.multi-dap.installer.yaml
+          grep -Fx "PackageVersion: $version" release-assets/Tacrolimus.multi-dap.locale.en-US.yaml
+          grep -Fx "License: $RELEASE_LICENSE" release-assets/Tacrolimus.multi-dap.locale.en-US.yaml
+          grep -Fx "    InstallerUrl: '$expected_url'" release-assets/Tacrolimus.multi-dap.installer.yaml
+          grep -Fx "    InstallerSha256: ${archive_hash^^}" release-assets/Tacrolimus.multi-dap.installer.yaml
+      - name: Verify GitHub build provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          for asset in release-assets/*; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --source-digest "$RELEASE_COMMIT" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --deny-self-hosted-runners
+          done
+      - name: Require external release immutability protections
+        shell: bash
+        env:
+          RELEASE_IMMUTABILITY_ENABLED: ${{ vars.RELEASE_IMMUTABILITY_ENABLED }}
+          RELEASE_TAG_RULESET_ENABLED: ${{ vars.RELEASE_TAG_RULESET_ENABLED }}
+          RELEASE_DEFAULT_BRANCH_PROTECTED: ${{ vars.RELEASE_DEFAULT_BRANCH_PROTECTED }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_IMMUTABILITY_ENABLED" != 'true' ]]; then
+            echo 'Set RELEASE_IMMUTABILITY_ENABLED=true on the protected production environment only after enabling GitHub immutable releases.' >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TAG_RULESET_ENABLED" != 'true' ]]; then
+            echo 'Set RELEASE_TAG_RULESET_ENABLED=true on the protected production environment only after a v* tag ruleset restricts creation and forbids updates and deletion.' >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_DEFAULT_BRANCH_PROTECTED" != 'true' ]]; then
+            echo 'Set RELEASE_DEFAULT_BRANCH_PROTECTED=true on the protected production environment only after verifying the default-branch review, CI, force-push, deletion, and bypass rules.' >&2
+            exit 1
+          fi
+      - name: Publish verified draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
+          fi
+      - name: Verify immutable published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          expected_prerelease=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            expected_prerelease=true
+          fi
+
+          # GitHub may briefly return the pre-publication representation after
+          # gh release edit. This loop only re-reads state; it never rebuilds or
+          # modifies the release, its tag, or its assets.
+          for attempt in {1..6}; do
+            if release_json="$(gh api \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)" &&
+              tag_commit="$(gh api \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha 2>/dev/null)"; then
+              tag_commit="${tag_commit,,}"
+              if [[ "$tag_commit" =~ ^[0-9a-f]{40}$ ]] &&
+                [[ "$tag_commit" == "$RELEASE_COMMIT" ]] &&
+                jq -e \
+                  --arg tag "$RELEASE_TAG" \
+                  --argjson prerelease "$expected_prerelease" \
+                  '.tag_name == $tag and
+                   .draft == false and
+                   .prerelease == $prerelease and
+                   (.immutable | type == "boolean") and
+                   .immutable == true' \
+                  <<<"$release_json" > /dev/null; then
+                version="${RELEASE_TAG#v}"
+                archive_name="multi-dap-${version}-windows-amd64.zip"
+                expected_assets=(
+                  'Tacrolimus.multi-dap.installer.yaml'
+                  'Tacrolimus.multi-dap.locale.en-US.yaml'
+                  'Tacrolimus.multi-dap.yaml'
+                  "$archive_name"
+                  "$archive_name.sha256"
+                )
+                mapfile -t remote_assets < <(
+                  jq -r '.assets[].name' <<<"$release_json" | LC_ALL=C sort
+                )
+                if diff -u \
+                  <(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort) \
+                  <(printf '%s\n' "${remote_assets[@]}") > /dev/null; then
+                  assets_match=true
+                  for asset in release-assets/*; do
+                    name="$(basename "$asset")"
+                    digest="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+                    size="$(stat --format=%s "$asset")"
+                    if ! jq -e \
+                      --arg name "$name" \
+                      --arg digest "$digest" \
+                      --argjson size "$size" \
+                      '[.assets[] | select(.name == $name)] |
+                       length == 1 and
+                       .[0].state == "uploaded" and
+                       .[0].digest == $digest and
+                       .[0].size == $size' \
+                      <<<"$release_json" > /dev/null; then
+                      assets_match=false
+                      break
+                    fi
+                  done
+                  if [[ "$assets_match" == 'true' ]]; then
+                    exit 0
+                  fi
+                fi
+              fi
+            fi
+            if [[ "$attempt" -lt 6 ]]; then
+              sleep 5
+            fi
+          done
+
+          echo 'The published release did not converge to the expected tag, commit, draft, prerelease, and immutable state within the bounded read-only retry window.' >&2
+          exit 1
