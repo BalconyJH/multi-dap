@@ -1,0 +1,86 @@
+{
+  "name": "multi-dap-vscode",
+  "version": "0.1.0",
+  "description": "Local Debug Adapter Protocol integration for multi-dap",
+  "main": "src/extension.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check src/extension.js && node --check test/extension.test.js && node --check scripts/list-package-files.js",
+    "package-contents": "node scripts/list-package-files.js"
+  },
+  "keywords": [],
+  "author": "Tacrolimus",
+  "license": "MIT",
+  "type": "commonjs",
+  "displayName": "multi-dap",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onDebug:multi-dap"
+  ],
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "multi-dap",
+        "label": "multi-dap",
+        "languages": [],
+        "configurationAttributes": {
+          "attach": {
+            "properties": {
+              "configFile": {
+                "type": "string",
+                "description": "Absolute path to the multi-dap project TOML configuration."
+              },
+              "controlDirectory": {
+                "type": "string",
+                "description": "Optional absolute path to multi-dap's private control-record directory."
+              }
+            },
+            "required": [
+              "configFile"
+            ]
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Attach to multi-dap",
+            "description": "Connect through the authenticated local multi-dap proxy.",
+            "body": {
+              "name": "Attach to multi-dap",
+              "type": "multi-dap",
+              "request": "attach",
+              "configFile": "${workspaceFolder}/project.toml"
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "multi-dap",
+      "properties": {
+        "multiDap.executable": {
+          "type": "string",
+          "default": "multi-dap",
+          "scope": "machine",
+          "description": "Path or command name for the local multi-dap executable."
+        }
+      }
+    }
+  },
+  "files": [
+    "README.md",
+    "src"
+  ],
+  "publisher": "tacrolimus",
+  "extensionKind": [
+    "ui"
+  ]
+}
