@@ -1,0 +1,8 @@
+The currently registered components are:
+	fixture_manager.0
+	fixture.component.1
+	fixture.component.2 (debugger.name.X:/fixture/bin/alpha.elf)
+	fixture.component.3 (debugger.name.X:/fixture/bin/beta.elf)
+	fixture.component.4 (debugserver.name.fixture-router)
+	fixture.component.5 (debugger.pid.1)
+	fixture.component.6 (debugger.pid.2)

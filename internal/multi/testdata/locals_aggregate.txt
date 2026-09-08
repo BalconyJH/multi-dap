@@ -1,0 +1,10 @@
+fixture_aggregate = volatile struct AggregateResult {
+    status = TARGET_STATUS_OK (0);
+    completedChecks = 32;
+    nested = struct NestedResults {
+        valid = TARGET_STATUS_OK (0);
+        wrongId = TARGET_STATUS_VERIFY_FAILED (36);
+    };
+} fixture_aggregate
+fixture_dead = 7 << Dead >>
+fixture_hidden = 9	*** Caution: variable is hidden or out of scope ***

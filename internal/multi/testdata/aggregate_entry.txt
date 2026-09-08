@@ -1,0 +1,9 @@
+volatile struct FixtureItem_t {
+    state = FixtureState_IDLE (0);
+    messageSize = 0;
+    priority = 0;
+    bufferSize = 0;
+    timeout = 101;
+    lastTimestamp = 0;
+    errorCount = 0;
+}
