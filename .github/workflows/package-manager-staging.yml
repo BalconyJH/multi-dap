@@ -1,0 +1,429 @@
+name: Package-manager staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published immutable stable release tag to stage (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: package-manager-staging-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: Verify published release inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      archive_name: ${{ steps.release.outputs.archive_name }}
+      archive_sha256: ${{ steps.archive.outputs.archive_sha256 }}
+    steps:
+      - name: Validate stable release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Package-manager staging accepts only stable Semantic Versioning tags: $RELEASE_TAG" >&2
+            exit 1
+          fi
+      - name: Check out the exact release tag cleanly
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and gate immutable public release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
+            echo 'The release-tag checkout is not clean.' >&2
+            exit 1
+          fi
+          release_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          head_commit="$(git rev-parse 'HEAD^{commit}')"
+          release_commit="${release_commit,,}"
+          head_commit="${head_commit,,}"
+          if [[ ! "$release_commit" =~ ^[0-9a-f]{40}$ || "$head_commit" != "$release_commit" ]]; then
+            echo 'The checked-out revision does not resolve to the requested tag commit.' >&2
+            exit 1
+          fi
+          encoded_tag="$(jq -rn --arg value "$RELEASE_TAG" '$value | @uri')"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$encoded_tag" > release.json
+          if ! jq -e \
+              --arg tag "$RELEASE_TAG" \
+              '.tag_name == $tag and
+               .draft == false and
+               .prerelease == false and
+               .immutable == true and
+               (.published_at | type == "string" and length > 0)' \
+              release.json > /dev/null; then
+            echo 'The requested release must be published, stable, non-draft, and immutable.' >&2
+            exit 1
+          fi
+          visibility="$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)"
+          if [[ "$visibility" != 'public' ]]; then
+            echo 'Package-manager staging requires a public repository.' >&2
+            exit 1
+          fi
+          if ! cmp -s LICENSE packaging/LICENSE.txt; then
+            echo 'Root and packaged license files must be identical.' >&2
+            exit 1
+          fi
+          if ! jq -e '
+              .schema == "multi-dap.release-policy/v1" and
+              .public_distribution_approved == true and
+              .license == "MIT" and
+              (.license_file_sha256 | type == "string" and test("^[0-9a-fA-F]{64}$"))
+            ' packaging/release-policy.json > /dev/null; then
+            echo 'The tagged release source does not approve public MIT distribution.' >&2
+            exit 1
+          fi
+          expected_license_hash="$(jq -r .license_file_sha256 packaging/release-policy.json | tr 'A-F' 'a-f')"
+          actual_license_hash="$(sha256sum LICENSE | cut -d ' ' -f 1)"
+          if [[ "$actual_license_hash" != "$expected_license_hash" ]]; then
+            echo 'LICENSE does not match the approved release-policy digest.' >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          archive_name="multi-dap-${version}-windows-amd64.zip"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
+          printf 'archive_name=%s\n' "$archive_name" >> "$GITHUB_OUTPUT"
+      - name: Download exactly the five published release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive_name }}
+        run: |
+          set -euo pipefail
+          expected_assets=(
+            'Tacrolimus.multi-dap.installer.yaml'
+            'Tacrolimus.multi-dap.locale.en-US.yaml'
+            'Tacrolimus.multi-dap.yaml'
+            "$ARCHIVE_NAME"
+            "$ARCHIVE_NAME.sha256"
+          )
+          mapfile -t release_assets < <(jq -r '.assets[] | .name' release.json | LC_ALL=C sort)
+          if ! diff -u \
+              <(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort) \
+              <(printf '%s\n' "${release_assets[@]}"); then
+            echo 'Published release assets do not match the exact allowlist.' >&2
+            exit 1
+          fi
+          mkdir -p release-assets evidence/release-manifests
+          for asset in "${expected_assets[@]}"; do
+            gh release download "$RELEASE_TAG" --pattern "$asset" --dir release-assets
+          done
+          mapfile -t downloaded_assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          if ! diff -u \
+              <(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort) \
+              <(printf '%s\n' "${downloaded_assets[@]}"); then
+            echo 'Downloaded assets do not match the exact allowlist.' >&2
+            exit 1
+          fi
+          cp release-assets/Tacrolimus.multi-dap*.yaml evidence/release-manifests/
+      - name: Verify release asset digests and detached checksum
+        id: archive
+        shell: bash
+        env:
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive_name }}
+        run: |
+          set -euo pipefail
+          for asset in release-assets/*; do
+            name="$(basename "$asset")"
+            local_digest="sha256:$(sha256sum "$asset" | cut -d ' ' -f 1)"
+            github_digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest // empty' release.json)"
+            if [[ ! "$github_digest" =~ ^sha256:[0-9a-f]{64}$ || "$github_digest" != "$local_digest" ]]; then
+              echo "GitHub digest is missing or mismatched for $name." >&2
+              exit 1
+            fi
+          done
+          archive_hash="$(sha256sum "release-assets/$ARCHIVE_NAME" | cut -d ' ' -f 1)"
+          checksum_line="$(cat "release-assets/$ARCHIVE_NAME.sha256")"
+          if [[ "$(wc -l < "release-assets/$ARCHIVE_NAME.sha256")" -ne 1 ||
+                "$checksum_line" != "$archive_hash  $ARCHIVE_NAME" ]]; then
+            echo 'Detached checksum must contain exactly the archive digest and name.' >&2
+            exit 1
+          fi
+          (cd release-assets && sha256sum --check "$ARCHIVE_NAME.sha256")
+          printf 'archive_sha256=%s\n' "$archive_hash" >> "$GITHUB_OUTPUT"
+          jq '[.assets[] | {name, digest, size}]' release.json > evidence/github-release-asset-digests.json
+          printf '%s  %s\n' "$archive_hash" "$ARCHIVE_NAME" > evidence/archive-sha256.txt
+      - name: Verify archive contents, internal checksums, provenance, and license
+        shell: bash
+        env:
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive_name }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          expected_entries=(
+            'LICENSE.txt'
+            'README.md'
+            'SHA256SUMS.txt'
+            'THIRD_PARTY_NOTICES.md'
+            'bridge/bridge.py'
+            'editors/clion/README.md'
+            'editors/clion/profile-contract.json'
+            'examples/multi-dap.example.toml'
+            'licenses/Go.txt'
+            'licenses/go-toml.txt'
+            'multi-dap.exe'
+            'release-provenance.json'
+          )
+          mapfile -t actual_entries < <(unzip -Z1 "release-assets/$ARCHIVE_NAME" | LC_ALL=C sort)
+          if ! diff -u \
+              <(printf '%s\n' "${expected_entries[@]}" | LC_ALL=C sort) \
+              <(printf '%s\n' "${actual_entries[@]}"); then
+            echo 'Release archive entries do not match the exact payload allowlist.' >&2
+            exit 1
+          fi
+          mkdir extracted
+          unzip -q "release-assets/$ARCHIVE_NAME" -d extracted
+          (cd extracted && sha256sum --check SHA256SUMS.txt)
+          cmp LICENSE extracted/LICENSE.txt
+          cmp packaging/README.md extracted/README.md
+          cmp THIRD_PARTY_NOTICES.md extracted/THIRD_PARTY_NOTICES.md
+          cmp bridge/bridge.py extracted/bridge/bridge.py
+          cmp editors/clion/README.md extracted/editors/clion/README.md
+          cmp editors/clion/profile-contract.json extracted/editors/clion/profile-contract.json
+          cmp multi-dap.example.toml extracted/examples/multi-dap.example.toml
+          cmp third_party/go/LICENSE extracted/licenses/Go.txt
+          cmp third_party/go-toml/LICENSE extracted/licenses/go-toml.txt
+          binary_hash="$(sha256sum extracted/multi-dap.exe | cut -d ' ' -f 1)"
+          binary_size="$(stat --format=%s extracted/multi-dap.exe)"
+          version="${RELEASE_TAG#v}"
+          source_date_epoch="$(git show -s --format=%ct "$RELEASE_COMMIT")"
+          jq -e \
+            --arg version "$version" \
+            --arg commit "$RELEASE_COMMIT" \
+            --arg binary_hash "$binary_hash" \
+            --argjson epoch "$source_date_epoch" \
+            --argjson binary_size "$binary_size" \
+            '.schema == "multi-dap.release-provenance/v1" and
+             .package == "multi-dap" and
+             .version == $version and
+             .commit == $commit and
+             .source_date_epoch == $epoch and
+             .target.os == "windows" and
+             .target.architecture == "amd64" and
+             .binary.path == "multi-dap.exe" and
+             .binary.sha256 == $binary_hash and
+             .binary.size == $binary_size' \
+            extracted/release-provenance.json > /dev/null
+          cp extracted/release-provenance.json evidence/release-provenance.json
+          cp extracted/SHA256SUMS.txt evidence/archive-internal-sha256sums.txt
+      - name: Regenerate and compare WinGet manifests byte-for-byte
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive_name }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'release-assets' $env:ARCHIVE_NAME)).Hash
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$env:ARCHIVE_NAME"
+          .\scripts\New-WinGetManifest.ps1 `
+            -Version $version `
+            -InstallerUrl $url `
+            -InstallerSha256 $hash `
+            -OutputDirectory .\generated-winget `
+            -Repository $env:GITHUB_REPOSITORY `
+            -License MIT
+          foreach ($name in @(
+              'Tacrolimus.multi-dap.yaml',
+              'Tacrolimus.multi-dap.installer.yaml',
+              'Tacrolimus.multi-dap.locale.en-US.yaml')) {
+            $generated = Join-Path '.\generated-winget' $name
+            $published = Join-Path '.\release-assets' $name
+            if (-not [System.Linq.Enumerable]::SequenceEqual(
+                    [System.IO.File]::ReadAllBytes($generated),
+                    [System.IO.File]::ReadAllBytes($published))) {
+              throw "Regenerated WinGet manifest differs byte-for-byte from published release asset: $name"
+            }
+          }
+          New-Item -ItemType Directory -Path .\evidence\regenerated-manifests | Out-Null
+          Copy-Item -Path .\generated-winget\*.yaml -Destination .\evidence\regenerated-manifests
+      - name: Verify GitHub attestations for every release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          for asset in release-assets/*; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --source-digest "$RELEASE_COMMIT" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --deny-self-hosted-runners
+          done
+          printf 'All five release assets have GitHub build attestations verified against %s at %s.\n' "$RELEASE_TAG" "$RELEASE_COMMIT" > evidence/attestation-verification.txt
+      - name: Upload review evidence only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-manager-staging-evidence-${{ inputs.tag }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  clean-host-winget:
+    name: WinGet clean-host install and uninstall
+    needs: verify-release
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Require WinGet and download verified published assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          ARCHIVE_NAME: ${{ needs.verify-release.outputs.archive_name }}
+          ARCHIVE_SHA256: ${{ needs.verify-release.outputs.archive_sha256 }}
+        run: |
+          $winget = Get-Command winget -ErrorAction SilentlyContinue
+          if ($null -eq $winget) {
+            throw 'windows-2025 did not provide winget; refusing to skip the clean-host package-manager test.'
+          }
+          $expected = @(
+            'Tacrolimus.multi-dap.installer.yaml',
+            'Tacrolimus.multi-dap.locale.en-US.yaml',
+            'Tacrolimus.multi-dap.yaml',
+            $env:ARCHIVE_NAME,
+            "$($env:ARCHIVE_NAME).sha256"
+          ) | Sort-Object
+          New-Item -ItemType Directory -Path .\release-assets | Out-Null
+          foreach ($asset in $expected) {
+            gh release download $env:RELEASE_TAG --pattern $asset --dir .\release-assets
+            if ($LASTEXITCODE -ne 0) { throw "Failed to download release asset: $asset" }
+          }
+          $actual = @(Get-ChildItem -LiteralPath .\release-assets -File | ForEach-Object Name | Sort-Object)
+          if (($actual -join "`n") -cne ($expected -join "`n")) {
+            throw "Downloaded release assets do not match the exact allowlist: $($actual -join ', ')"
+          }
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path .\release-assets $env:ARCHIVE_NAME)).Hash.ToLowerInvariant()
+          if ($actualHash -cne $env:ARCHIVE_SHA256.ToLowerInvariant()) {
+            throw 'The clean-host archive digest differs from the release verification output.'
+          }
+          $checksum = Get-Content -LiteralPath (Join-Path .\release-assets "$($env:ARCHIVE_NAME).sha256") -Raw
+          if ($checksum -cne "$actualHash  $($env:ARCHIVE_NAME)`n") {
+            throw 'The detached checksum does not exactly match the clean-host archive.'
+          }
+          Expand-Archive `
+            -LiteralPath (Join-Path .\release-assets $env:ARCHIVE_NAME) `
+            -DestinationPath .\expected-payload
+          New-Item -ItemType Directory -Path .\winget-manifests | Out-Null
+          Copy-Item -LiteralPath .\release-assets\Tacrolimus.multi-dap.yaml -Destination .\winget-manifests
+          Copy-Item -LiteralPath .\release-assets\Tacrolimus.multi-dap.installer.yaml -Destination .\winget-manifests
+          Copy-Item -LiteralPath .\release-assets\Tacrolimus.multi-dap.locale.en-US.yaml -Destination .\winget-manifests
+      - name: Validate and install the local manifest without machine scope
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.verify-release.outputs.version }}
+        run: |
+          $winget = (Get-Command winget -ErrorAction Stop).Source
+          $manifestDirectory = (Resolve-Path -LiteralPath .\winget-manifests).Path
+          $existing = Get-Command multi-dap -ErrorAction SilentlyContinue
+          if ($null -ne $existing) {
+            throw "The supposedly clean host already resolves multi-dap at $($existing.Source)."
+          }
+          & $winget validate --manifest $manifestDirectory
+          if ($LASTEXITCODE -ne 0) { throw "winget validate failed with exit code $LASTEXITCODE" }
+          $help = (& $winget install --help | Out-String)
+          if ($help -notmatch '(?m)--manifest\b') {
+            throw 'The installed winget does not support local-manifest installation.'
+          }
+          & $winget settings --enable LocalManifestFiles
+          if ($LASTEXITCODE -ne 0) {
+            throw "winget could not enable its required LocalManifestFiles setting (exit $LASTEXITCODE)"
+          }
+          $install = @('install', '--manifest', $manifestDirectory, '--exact')
+          foreach ($flag in @('--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--silent', '--scope')) {
+            if ($help -match [regex]::Escape($flag)) {
+              $install += $flag
+              if ($flag -eq '--scope') { $install += 'user' }
+            }
+          }
+          & $winget @install
+          if ($LASTEXITCODE -ne 0) { throw "winget install failed with exit code $LASTEXITCODE" }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:Path = "$machinePath;$userPath"
+          $installed = Get-Command multi-dap -ErrorAction SilentlyContinue
+          if ($null -eq $installed) { throw 'WinGet install completed but multi-dap is absent from the refreshed user PATH.' }
+          $commandItem = Get-Item -LiteralPath $installed.Source
+          $installedExecutable = $commandItem.FullName
+          if (-not [string]::IsNullOrWhiteSpace($commandItem.LinkType)) {
+            $linkTarget = $commandItem.ResolveLinkTarget($true)
+            if ($null -eq $linkTarget -or -not $linkTarget.Exists) {
+              throw 'The WinGet portable-command link does not resolve to an installed executable.'
+            }
+            $installedExecutable = $linkTarget.FullName
+          }
+          $installedBridge = Join-Path (Split-Path -Parent $installedExecutable) 'bridge\bridge.py'
+          $expectedRoot = (Resolve-Path -LiteralPath .\expected-payload).Path
+          $expectedBridge = Join-Path $expectedRoot 'bridge\bridge.py'
+          if (-not (Test-Path -LiteralPath $installedBridge -PathType Leaf)) {
+            throw 'WinGet installed the executable without its required bridge/bridge.py companion.'
+          }
+          $installedBridgeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedBridge).Hash
+          $expectedBridgeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $expectedBridge).Hash
+          if ($installedBridgeHash -cne $expectedBridgeHash) {
+            throw 'The WinGet-installed bridge differs from the verified release archive.'
+          }
+          $metadata = & multi-dap version | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $metadata.version -cne $env:EXPECTED_VERSION) {
+            throw "Installed multi-dap version does not equal $($env:EXPECTED_VERSION)."
+          }
+      - name: Uninstall the exact package and verify command removal
+        shell: pwsh
+        run: |
+          $winget = (Get-Command winget -ErrorAction Stop).Source
+          $help = (& $winget uninstall --help | Out-String)
+          $uninstall = @('uninstall', '--id', 'Tacrolimus.multi-dap', '--exact')
+          foreach ($flag in @('--accept-source-agreements', '--disable-interactivity', '--silent', '--scope')) {
+            if ($help -match [regex]::Escape($flag)) {
+              $uninstall += $flag
+              if ($flag -eq '--scope') { $uninstall += 'user' }
+            }
+          }
+          & $winget @uninstall
+          if ($LASTEXITCODE -ne 0) { throw "winget uninstall failed with exit code $LASTEXITCODE" }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:Path = "$machinePath;$userPath"
+          if ($null -ne (Get-Command multi-dap -ErrorAction SilentlyContinue)) {
+            throw 'WinGet uninstall completed but multi-dap remains resolvable from PATH.'
+          }
+      - name: Restore the local-manifest setting
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $winget = Get-Command winget -ErrorAction SilentlyContinue
+          if ($null -ne $winget) {
+            & $winget.Source settings --disable LocalManifestFiles
+            if ($LASTEXITCODE -ne 0) {
+              throw "winget could not disable LocalManifestFiles (exit $LASTEXITCODE)"
+            }
+          }
