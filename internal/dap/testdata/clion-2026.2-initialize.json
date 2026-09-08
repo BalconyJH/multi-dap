@@ -1,0 +1,12 @@
+{
+  "clientID": "clion",
+  "clientName": "CLion",
+  "adapterID": "clion.dap.debugger",
+  "locale": "en",
+  "pathFormat": "path",
+  "linesStartAt1": true,
+  "columnsStartAt1": true,
+  "supportsVariablePaging": true,
+  "supportsVariableType": true,
+  "supportsRunInTerminalRequest": true
+}
