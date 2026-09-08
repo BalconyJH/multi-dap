@@ -58,8 +58,8 @@ var ErrStale = errors.New("stale handle")
 var errExhausted = errors.New("handle id space exhausted")
 
 // maxID is the last id Alloc will hand out. DAP requires variablesReference
-// values in (0, 2^31); 1<<31-1 is the largest value that still fits, so
-// allocation is refused once the next id would reach it.
+// values in (0, 2^31); 1<<31-1 is the largest value that still fits. After
+// allocating it, next becomes zero, the private exhausted sentinel.
 const maxID = 1<<31 - 1
 
 // Store allocates and resolves handles for one debug session.
@@ -105,12 +105,16 @@ func (s *Store) Alloc(kind Kind, core CoreID, stopEpoch uint64, value any) (int3
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.next >= maxID {
+	if s.next <= 0 {
 		return 0, fmt.Errorf("alloc kind=%d core=%d: %w", kind, core, errExhausted)
 	}
 
 	id := s.next
-	s.next++
+	if id == maxID {
+		s.next = 0
+	} else {
+		s.next++
+	}
 	s.m[id] = Handle{
 		ID:        id,
 		Kind:      kind,
@@ -159,10 +163,11 @@ func (s *Store) DropStopBound() {
 	s.m = make(map[int32]Handle)
 }
 
-// SetNextForTest forces the next id Alloc will hand out. It exists solely so
-// tests can exercise near-exhaustion behavior without allocating two billion
-// handles; production code must never call it.
-func (s *Store) SetNextForTest(next int32) {
+// setNextForTest forces the next id Alloc will hand out. It exists solely so
+// package tests can exercise near-exhaustion behavior without allocating two
+// billion handles. It is deliberately not exported: production callers must
+// not be able to alter the monotonic allocator.
+func (s *Store) setNextForTest(next int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

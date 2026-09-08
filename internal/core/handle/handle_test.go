@@ -70,11 +70,15 @@ func TestAllocatedIDsAreInDAPRange(t *testing.T) {
 	}
 }
 
-func TestAllocRefusesNearExhaustion(t *testing.T) {
+func TestAllocAllowsFinalDAPIDThenRefusesExhaustion(t *testing.T) {
 	s := NewStore()
-	s.SetNextForTest(1<<31 - 1)
-	if _, err := s.Alloc(KindFrame, 0, 1, "x"); err == nil {
-		t.Fatal("Alloc() near exhaustion error = nil, want an exhaustion error")
+	s.setNextForTest(1<<31 - 1)
+	id, err := s.Alloc(KindFrame, 0, 1, "x")
+	if err != nil || id != 1<<31-1 {
+		t.Fatalf("Alloc() final DAP id = (%d, %v), want (%d, nil)", id, err, 1<<31-1)
+	}
+	if _, err := s.Alloc(KindFrame, 0, 1, "y"); err == nil {
+		t.Fatal("Alloc() after final DAP id error = nil, want exhaustion")
 	}
 }
 
