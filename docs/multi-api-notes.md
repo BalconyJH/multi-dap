@@ -18,7 +18,7 @@ computed from a fixed front-matter offset. A handful of searches were cross-chec
 second, non-`-layout` extraction (`pdftotext` with no flags) to rule out `-layout` inserting
 spurious spaces inside identifiers; no discrepancies were found.
 
-**Manuals read** (all under `D:/ghs/multi_716d/manuals/`):
+**Manuals read** (all under `<MULTI-installation>/manuals/`):
 
 | File | Title | Pages | Relevance |
 |---|---|---|---|
@@ -36,7 +36,7 @@ contain none relevant to the scripting/command surface.
 Every `connect`/`target`/`xmit` command description defers processor- and debug-server-specific
 argument syntax to "the MULTI: Configuring Connections book for your processor family" or the
 "Green Hills Debug Probes User's Guide" — neither of which is present in
-`D:/ghs/multi_716d/manuals/`. The generic command forms below are documented; the exact
+`<MULTI-installation>/manuals/`. The generic command forms below are documented; the exact
 `dbserver_arguments` accepted by `850eserv2` are **NOT DOCUMENTED in the mined set — must be
 probed** (or read from the saved MULTI connection / `850eserv2 -help`).
 
@@ -117,6 +117,10 @@ structured (non-text) value through `GHS_Debugger`.
 | `install_bp_on_request` | `install_bp_on_request -enable \| -install` | Freeze-mode setup-script command deferring breakpoint installation until the target signals it's safe (MMU-dependent scenarios) | 64 |
 | `tog` / `Tog` | `tog [address_expression\|breakpoint_list]` / `Tog` | Toggles active/inactive without deleting | 70–71 |
 
+Numeric breakpoint IDs in `breakpoint_list` must carry the `%` prefix; for example, a single ID
+is `%1`, and a list can be written as `%1,%4:%7`. `d 1` or `tog 1` enters the
+`address_expression` branch and is not an equivalent way to operate by breakpoint ID.
+
 **Halted-target requirement for deletion:** `NOT DOCUMENTED - must be probed`. Neither `d`,
 `D`, nor `hardbrk ... delete=` states whether the target must be halted first. The only
 explicit halted/running distinction found anywhere in the breakpoint chapter is `b`'s `/off`
@@ -135,10 +139,11 @@ when synchronous debugging is enabled.
 
 | Command | Signature | Shape / notes | Page | GUI-only? |
 |---|---|---|---|---|
-| `calls` | `calls [maxdepth] [par\|nopar] [pos\|nopos] [local\|nolocal] [types\|notypes] [templatetypes\|notemplatetypes] [showallframes\|noshowallframes]` | Prints the current call stack as text to the command pane; default `maxdepth`=20, max 32768 | 78 | No |
+| `calls` | `calls [maxdepth] [par\|nopar] [pos\|nopos] [local\|nolocal] [types\|notypes] [templatetypes\|notemplatetypes] [showallframes\|noshowallframes]` | Outputs the current call stack as text to the command pane; default `maxdepth` is 20 and the maximum is 32768. Production reads use the documented `calls nopar pos notypes`: hardware captured both original source frames and a selected `identifier()` frame without source; every other source-less text form is rejected. | 78 | No |
 | `callsview` | `callsview [%name] [maxdepth] ...` | Same data in a dedicated Call Stack window | 79 | **Yes** |
 | `e` | `e [address_expression]` | Navigation/frame-selection command. `e` alone prints `file:func#line: address` (e.g. `test.c:PrintLine#28: 0x411c`); `e num_` selects call-stack frame number `num` (this is MULTI's "frame" command — no command literally named `frame` exists) | 147–148 | No |
-| `l` (no arg) | `l [object [string]]` | **No parameter**: lists locals and parameters of the current function (the `this` pointer too, for a C++ method); function must be on the stack | 115 | No |
+| `l` (no arg) | `l [object [string]]` | **No argument:** lists locals and parameters of the current function (including `this` for C++ methods); the function must be on the call stack. Hardware confirms only that command success with exactly empty output means zero locals; command rejection or unknown nonempty output is not collapsed into an empty scope. | 115 | No |
+| `l f` | `l f [string]` | Lists all source-file names; optional `string` is only a **contains filter** and cannot determine exact source membership. On hardware, p12 confirmed the unfiltered complete list's exact heading, five-column right-aligned contiguous indices, and Windows path grammar; after validating each line, a Windows canonical-key membership set is built, and case-equivalent duplicate lines are idempotent. Each M2 Resolve may use only that set as `Presence` evidence. Direct DAP Set/Clear on a stopped target has passed; native editor synchronization is scenario-specific, and an actual breakpoint hit remains unverified. | 115 | No |
 | `l @` | `l @ [string]` | Lists **addresses** of local variables instead of values | 115 | No |
 | `l g` | `l g [string]` | Lists names/addresses of globals + in-scope file statics | 115–116 | No |
 | `l S` | `l S [string]` | Lists static variables | 116 | No |
