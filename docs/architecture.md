@@ -1,14 +1,18 @@
 # multi-dap architecture
 
-**Status:** architecture accepted; MULTI binding contract pending M0.
-No implementation has started.
+**Status:** The architecture contract and current delivery status are maintained separately.
+Hardware evidence and its uncovered items are documented in
+[m0-findings.md](m0-findings.md).
 **Date:** 2026-08-18
-**Target:** Green Hills MULTI 7.1.6d (verified locally at `D:/ghs/multi_716d`)
+**Target:** Green Hills MULTI 7.1.6d (local installation and a five-core hardware session)
 **DAP target:** 1.71.0 — the baseline for any future behavioral dispute
 
-The main structure is settled. What remains uncertain is what execution, stop-reason, and
-value-inspection primitives MULTI 7.1.6d can actually provide. M0 exists to establish that
-contract; three of its blockers can still change the actor and event architecture.
+This document records the architecture contract and observed facts; design candidates, host
+tests, and future acceptance work must not be described as hardware validation. The actual
+delivery boundary is in §12: M2 and M3 top-level inspection are integrated; M4 `next`/`stepIn`
+is integrated only for the single-configured-core path, and multi-core `ExecutionDomain` has no
+production executor. Every unverified operation fails closed. M0-2, M0-6, and M0-7 remain
+unfinished hardware measurements.
 
 ## 1. Purpose
 
@@ -49,13 +53,31 @@ be wrong on hardware, the affected section must be revisited.
 | The Py pane / Py Window share one Python context per Debugger window; the standalone Python GUI has a separate context | `script.pdf`, "Interface Comparison" |
 | `$restart` restarts the underlying interpreter and discards the old context | `script.pdf`, Py pane commands |
 
+Verified on hardware in M0 (details and evidence in [m0-findings.md](m0-findings.md)):
+
+| Fact | Where it matters |
+|---|---|
+| `GHS_Debugger` is a **builtin** in the `mpythonrun` interpreter; no import | driver bring-up |
+| The command target is the `GHS_DebuggerWindow` returned by `DebugProgram`, not the `GHS_Debugger`. Connecting rebinds `GHS_Debugger` to the connection window, which has no process | §5, driver |
+| `ConnectToTarget(dbserver, setupScript, setupScriptArgs, multiLog, stickToTheDebugger, moreOpts, printOutput)` — `stickToTheDebugger = 1` is required to bind the target to the debugger window | driver |
+| `RunCommands(cmds, block, printOutput, keepRawOutput)` returns a **boolean**; the text lands in `cmdExecOutput`, the status in `cmdExecStatus`. With `block = 0` the output field is never populated | §7.2, §7.3 |
+| `Resume` / `Halt` / `Step` / `Next` take an explicit `block` parameter, and `simulateBlockingWithNonBlocking = True` — blocking is a client-side poll loop in MULTI-Python, not a blocking call into MULTI | §6.1 |
+| `GetCurPrInfo("")` returns 173 fields of MULTI's internal process state in 9–30 ms, including `stopStamp`, `contCount`, `pc`, `file`, `iln`, `proc`, `stackdepth`, the stop-condition flags, and the target memory map. Undocumented; several keys carry trailing spaces | §6.3, §7.3 |
+| `stopStamp` increments by exactly one on every confirmed Running → Stopped transition and is unchanged otherwise | §6.2, §6.3, §6.8 |
+| `H` reports a textual halt cause and, for a breakpoint with a command list, which list fired | §6.3, §6.5 |
+| `GetProcessAttribute` returns `False` for every index and name tried; it is not a usable data route | §7.3 |
+| `mpythonrun.exe` writes stdout with `WriteConsole` and raises a modal error dialog if its standard handles are redirected | §7.1 |
+| A bare `help`, and `prepare_target` with no action flag, block the interpreter permanently on a GUI prompt | §7.4, §10 |
+| Cores are MULTI processes. `switch -component "debugger.pid.N"` selects core N−1; `components` names them; `route` sends one command without changing selection; `P pr=N` is deprecated | §6.7 |
+| `$_SYNC_RC = 1` — synchronous freeze-group debugging is on | §6.7 |
+| The Green Hills compiler emits **no DWARF** into the ELF; debug information lives in proprietary `.dnm` / `.dla` files | §6.6 |
+
+**Still not verified:** whether a resident socket loop can run inside `mpythonrun` (M0-2),
+whether state polling perturbs a running target (M0-6, the one remaining item that can force a
+redesign), and whether removing a breakpoint perturbs a running target (M0-7).
+
 The absence of a callback API is why the event model in §8 has to be built rather than
 subscribed to.
-
-**Not yet verified:** whether execution primitives block until the next stop (M0-8), what
-stop reason is observable and whether a monotonic stop generation exists (M0-9), and how
-value inspection is structured (M0-4). Each can change this document; M0-9 additionally
-decides how far GUI coexistence can go (§6.8).
 
 ## 4. Architecture
 
@@ -139,10 +161,13 @@ writing it in Python 2.7. CI enforces the rest:
 - `bridge.py` must contain no retry loop, no state machine, no source mapping, no handle
   allocator
 
-A line-count ceiling is a review alarm (≈500 lines), not an architectural guarantee. If M0
-shows that some structured data is only reachable by normalizing MULTI text output, that
-parser legitimately belongs in the bridge or the MULTI Driver; length alone does not make it
-a layering violation.
+A line-count ceiling is a review alarm (approximately 500 lines), not an architectural
+guarantee. The current bridge is above that alarm after adding strict warm acquisition,
+console snapshots, memory, and disassembly mechanisms. Contract tests still enforce the
+policy boundary, but future maintenance should split mechanism-focused helpers without moving
+Debugger Core policy into Python. If M0 shows that some structured data is only reachable by
+normalizing MULTI text output, that parser legitimately belongs in the bridge or the MULTI
+Driver; length alone does not make it a layering violation.
 
 ## 6. Debugger Core
 
@@ -182,11 +207,18 @@ performed its own RPC could neither poll, nor halt, nor confirm a hint — the e
 model would wedge behind one call. The executor keeps the actor responsive to hints,
 deadlines, and client disconnects regardless.
 
-**Consequence if M0-8 shows execution primitives block:** the executor itself is still
-occupied, so `halt` cannot be delivered over the same connection. That case requires a
-second, independent control channel reserved for interruption and state queries, and the
-"one bridge connection" premise in §7 no longer holds. This is a branch in the architecture,
-not an implementation detail.
+**M0-8 resolved this in the favourable direction.** `Resume`, `Halt`, `Step`, and `Next` all
+take an explicit `block` parameter; `Resume(block=0)` returns in under a millisecond and
+`GetStatus()` immediately afterwards reports `running`. MULTI-Python's own "blocking" mode is
+`simulateBlockingWithNonBlocking = True` with `checkInterval = 0.5` — a poll loop in Python,
+not a blocking call into MULTI. A blocking execution primitive therefore cannot occupy the
+transport; it only occupies a caller that chose to wait.
+
+Consequently **the second control channel is not required**, and the "one bridge connection"
+premise of §7 holds. The bridge must always issue execution primitives with `block = 0` and
+let Debugger Core run the wait loop, so that deadline policy stays in Go as §10 requires.
+The actor/executor split remains, justified on its original grounds — responsiveness to
+hints, deadlines, and client disconnects — rather than on necessity.
 
 #### Generation fencing
 
@@ -262,8 +294,14 @@ is no DAP `continue` request to respond to, so the only way the client learns th
 resumed is the `continued` event:
 
 ```
-continued { threadId: <triggering core>, allThreadsContinued: true }
+continued { threadId: <a core in the resumed freeze group>, allThreadsContinued: true }
 ```
+
+The M1 state sample proves only the freeze-group transition, not which core initiated it.
+`GetCurPrInfo().pid` is a MULTI process identifier and is never reinterpreted as a DAP thread.
+Because DAP requires `continued.threadId`, M1 names one stable member of the group that did in fact
+resume. `stopped.threadId` is optional and remains absent until the stop arbiter has evidence for a
+specific core; using the first core there would fabricate causality.
 
 Stop-bound handles are dropped at the same moment (§6.4), before the event is emitted.
 
@@ -285,9 +323,18 @@ Polling follows the identical path; it merely arrives without a hint. Both sourc
 on one code path and deduplicate through the epoch.
 
 DAP `stopped` requires a `reason` — breakpoint, step, exception, pause — so confirming
-"stopped" is not by itself enough to emit a correct event. What MULTI can report about *why*
-it stopped is M0-9. Depending on the answer, either `state()` returns a structured stop
-description, or a separate `stop_info` primitive provides it:
+"stopped" is not by itself enough to emit a correct event. M0-9 established what MULTI can
+report: the `H` command returns a textual halt cause (`Halted by user request.`,
+`Halted for breakpoint.`, `Process not running.`) and, when the breakpoint carried a command
+list, the list itself — which identifies the firing breakpoint and so feeds
+`hitBreakpointIds`. `GetCurPrInfo("")` supplements it with `fContFromBp`, `fInStepMode`,
+`fPendingHalt`, `fStoppedOnException`, `pc`, `file`, `iln`, `proc`, and `stackdepth`.
+
+**`H` is not fully trustworthy on its own.** In one battery it still reported
+`Halted for breakpoint.` immediately after an explicit `halt`, when the honest answer was a
+user halt; it appears to report the most recent notable cause rather than the cause of the
+current stop. The stop arbiter therefore corroborates `H` against the flag fields and
+`$_BREAK`, and reports a conservative reason rather than a confidently wrong one:
 
 ```json
 { "execution": "stopped", "reason": "breakpoint", "core": 1, "breakpoint_handle": 17 }
@@ -320,8 +367,18 @@ externally-initiated execution.
 The only sound fix is an observable **stop generation**: a counter, sequence number, or
 equivalent field that changes on every stop, so that `Stopped(seq=51) → Stopped(seq=52)` is
 recognizable as a new suspended state even though the intervening `Running` was never
-sampled. Whether MULTI exposes one is M0-9, and the answer decides the GUI coexistence
-policy in §6.8.
+sampled.
+
+**M0-9 found one.** `GetCurPrInfo("")` returns a `stopStamp` field that increments by exactly
+one on every confirmed Running → Stopped transition — step, halt, or breakpoint alike — and
+does not move while the target is running or while it is already stopped. Measured across a
+scripted battery it went `0x0c → 0x0d → 0x0e → (running, unchanged) → 0x0f → 0x10 → 0x11 →
+0x12 → (halt while stopped, unchanged) → 0x13 → 0x14`.
+
+`StopEpoch` is therefore **derived from `stopStamp`, not counted independently**. Counting
+locally would miss exactly the case this field exists to catch: a stop multi-dap never
+observed. The adapter records the last observed `stopStamp` and treats any change in it as a
+confirmed stop, whatever produced it.
 
 When a transition is discovered only after the fact this way, invalidation and publication
 happen at detection time: handles are dropped, `ExecutionEpoch` and `StopEpoch` both advance,
@@ -362,10 +419,17 @@ an error rather than wrapped.
 `Core` is independent of invalidation: it exists because cores do not share an address
 space, and a variable or memory view must never be resolved against the wrong one.
 
-Memory follows the same rule through DAP's opaque `memoryReference`: the core and address
-space are encoded into the reference itself, so `readMemory` and `disassemble` never depend
-on which core happens to be "selected". Registers need no custom extension — DAP already
-allows a scope to be marked as registers.
+A generic DAP client preserves that rule with an opaque `memoryReference` containing the core,
+stop epoch, and address; multi-dap uses that form for frame PCs. CLion Cidr's manual Memory View
+instead sends only a numeric address and byte count. For that path a single-core topology is
+unambiguous; a multi-core topology must explicitly configure `inspection.default_core`.
+Without either proof the request fails before bridge I/O. The adapter never uses the selected
+or last-used thread and never encodes a core into the visible numeric address. Per-address-space
+DAP sessions remain the preferred deployment when operators need simultaneous manual numeric
+views of several non-shared address spaces.
+
+Registers need no custom DAP extension because a scope can be marked as registers, but the
+underlying MULTI register contract remains unverified and is not advertised.
 
 ### 6.5 Breakpoint store
 
@@ -402,22 +466,22 @@ The DAP side keeps one breakpoint ID regardless of how many physical breakpoints
 
 #### Hint tokens are generated before the breakpoint exists
 
-The breakpoint command list must contain the notification argument at creation time, but a
-MULTI handle is only known after creation. The identity carried over the hint channel is
-therefore a Go-generated opaque token, never a MULTI handle:
+The breakpoint command list must contain an identity at creation time, but a MULTI handle is
+only known after creation. The current identity is therefore a Go-generated opaque token,
+never a MULTI handle:
 
 ```
 Go       token = 0x9F2C41A7   (session-local unique)
 bp_set   {file, line, hint_token}
-MULTI    b foo#12 {python -s "notify(0x9F2C41A7)"}
-bridge   → returns MULTIHandle
-Go       token ↦ {core, MULTIHandle, logicalBreakpoint}
+MULTI    b foo#12 {mprintf("HIT 0x9F2C41A7\n")}
+bridge   B before/after → MULTIHandle
+stop     H command list → strict token parse → {core, MULTIHandle, logicalBreakpoint}
 ```
 
-The UDP datagram carries only the token. This closes the ordering problem, keeps DAP
-concepts out of the bridge, and removes any dependence on MULTI handles being globally
-unique. The token is not a security mechanism — 32 bits is not unguessable — and does not
-need to be; authenticity comes from the per-session nonce of §7.6.
+Only the byte-exact command generated by multi-dap is accepted; arbitrary command lists remain
+opaque. This closes the ordering problem, keeps DAP concepts out of the bridge, and removes any
+dependence on MULTI handles being globally unique. UDP/notifier is an optional, currently
+unwired wake-up seam (§8), not the source of production breakpoint identity.
 
 #### Partial failure and divergent placement
 
@@ -434,22 +498,29 @@ represented honestly as verified. Atomicity is chosen over best-effort because
 `verified = false` while a breakpoint is quietly live on one core is the more damaging
 outcome: the user is told nothing is set and the target stops anyway.
 
-**Rollback can itself fail**, and if `bp_clear` perturbs a running target (M0-7) it may not
-even be attemptable at that moment. In that case the physical breakpoint remains recorded
-with an `orphaned` marker, the condition is reported as a session fault, and removal is
-retried at the next natural stop. Ownership records are never discarded on failure — a
-`verified = false` response must never cause multi-dap to forget a breakpoint it created.
+**Rollback can itself fail.** The effect of `bp_clear` on a running target has not been verified
+on hardware, so the production policy never proactively halts for housekeeping: it first transfers
+the physical breakpoint owner to detached/pending, retains the orphan record, and cleans it up at
+the next naturally reached `stopped` epoch. A detach occurring in an already stopped epoch may
+have one immediate attempt, followed by at most one natural retry per `StopEpoch`; repeated polling
+in the same epoch never calls `Clear` indefinitely. The transaction state mutex is used only for
+plan/commit and never spans `Set`/`Clear`, while separate transaction serialization preserves the
+order of physical mutations; a detach fence prevents a concurrent transaction from recommitting an
+old owner as a live record. These are implementation invariants covered by host/race tests, not a
+hardware conclusion about `bp_clear` safety. All failed records are retained; `verified = false`
+must never make multi-dap forget a breakpoint that it created.
 
 #### Ownership and disconnect
 
 Breakpoints created through multi-dap are DAP-owned and tracked in the store. Breakpoints a
 user sets by hand in the MULTI GUI are not, and multi-dap never touches them.
 
-On client `disconnect`, all DAP-owned breakpoints are removed; nothing else changes — MULTI
-keeps running, the target is neither reset nor re-downloaded, and its execution state is
-untouched. Removal is required because the standard DAP startup sequence means the next
-client sends its full breakpoint configuration again; leaving the old physical breakpoints in
-place would accumulate duplicate command lists on the same line.
+On client `disconnect`, all DAP-owned breakpoints transfer to pending cleanup. If the target has
+already stopped naturally, removal is attempted in that epoch's bounded cleanup; otherwise the
+running target is not disturbed and cleanup waits for a subsequent natural stop. MULTI is never
+reset or re-downloaded for this housekeeping. The next client must still send its complete
+breakpoint configuration; retained ownership/pending records prevent duplicate command lists and
+keep physical breakpoints that have not yet been cleaned up visible.
 
 Two consequences must be documented rather than assumed:
 
@@ -458,10 +529,9 @@ Two consequences must be documented rather than assumed:
 - This behavior is a deliberate DAP compatibility decision, not an internal detail — see
   §9.3.
 
-**Unverified dependency:** whether `bp_clear` perturbs a running target. If removing a
-breakpoint requires an implicit halt, then "disconnect does not change execution state" is
-false as written. Fallbacks in that case: defer removal until the next natural stop, or
-accept and explicitly document one halt at disconnect. Verified in M0-7.
+**Unverified dependency:** whether `bp_clear` perturbs a running target. The current policy
+therefore defers work to a naturally reached stopped epoch; “does not alter execution state”
+must not be stated as an M0-7-verified fact.
 
 ### 6.6 Source identity and the source index
 
@@ -492,8 +562,38 @@ The index answers exactly one question: **which cores contain this source file.*
 more. It does not build a symbol table and does not map lines to addresses — MULTI already
 does that, and `bp_set(file#line)` goes through MULTI.
 
-Built at session open by scanning each configured ELF's DWARF line-table file names
-(`debug/elf` + `debug/dwarf`). A project therefore only declares:
+**The DWARF plan did not survive contact with the toolchain.** M0 established that the Green
+Hills compiler emits no DWARF into the ELF at all: both executables open cleanly with
+`debug/elf` (`ELFCLASS32`, `EM_V800`) and then fail with
+`decoding dwarf section info at offset 0x0: too short`, because there is no `.debug_info`
+section. The section table carries only `.symtab`/`.strtab` plus Green Hills and Renesas
+proprietary sections; debug information lives in sibling `.dnm` / `.dla` files in MULTI's own
+debug-database format. A cross-compiled control fixture parses correctly, so the Go side is
+sound — the data simply is not there.
+
+**Source routing is therefore bounded by the tri-state `Presence` of each configured core.** With
+a complete DWARF line table, `Present`/`Absent` can be definitive results; this toolchain has no
+DWARF, so the production resolver reads one complete `l f` list for each verified core in every
+Resolve. The sole grammar confirmed on p12 hardware is `--------  File names  --------`, followed
+by contiguous zero-based decimal indices right-aligned in five columns and
+`    N: X:\absolute\path.ext` lines (measured 1/2/3-digit indices have 4/3/2 leading spaces,
+respectively). Each line independently passes exact grammar and absolute-path validation before
+being added to the canonical membership set; duplicate lines with the same Windows canonical key
+are idempotent membership, and neither carry nor select a raw spelling. Only canonical exact
+membership can produce `Present`/`Absent`; any parsing, routing, or transport uncertainty is
+`Unknown`. The list is never cached across Resolve calls, because an external GUI can reload the
+same ELF path. Placement is refused when any core is `Unknown`, rather than treating it as
+`Absent`. Direct DAP Set/Clear and native CLion synchronization have been observed on a stopped
+target; actual breakpoint hits still await acceptance.
+
+`recon/probes/p03_m2_source_known.py` is a warm-only follow-up evidence tool. By default, it only
+performs callable inventory for each strictly bound core and sends no debugger command. After
+explicit operator confirmation, it may use one pair of local opaque operands against allowlisted
+unary symbol APIs on each core and check stopped recovery. It can demonstrate the presence of a
+candidate API and distinguish the two operands; it cannot demonstrate that MULTI can parse a
+source path or `line`, much less promote `Presence` from `Unknown` to definitive.
+
+A project therefore still only declares:
 
 ```toml
 [[cores]]
@@ -502,11 +602,6 @@ elf = "out/core0.elf"
 ```
 
 and never maintains a hand-written source-to-core map.
-
-Risk: the DWARF version emitted by the GHS compiler, the form of `DW_AT_comp_dir` /
-`DW_AT_name`, and any architecture-specific encoding may not be handled by the Go standard
-library. Fallback if scanning fails: ask MULTI per core whether the file is known, and cache
-the answer. Validated early in M1.
 
 ### 6.7 Thread model: freeze group
 
@@ -536,12 +631,12 @@ reset, download, or delete breakpoints there at any time. The invariant is there
 the Session Actor is the sole *multi-dap* command owner, and target state is **observed**,
 never assumed.
 
-v1 policy, **conditional on M0-9**. Every supported entry below assumes MULTI exposes an
-observable stop generation (§6.3). Without one, externally-initiated execution that begins
-and completes between two polls is undetectable, and the policy degrades to the right-hand
-column:
+v1 policy. M0-9 confirmed that MULTI exposes an observable stop generation (`stopStamp`,
+§6.3), so every entry below holds in its supported form. The right-hand column is retained
+only as the contingency should `stopStamp` prove unreliable on another MULTI version or
+target.
 
-| GUI action while a DAP client is attached | With stop generation | Without |
+| GUI action while a DAP client is attached | With stop generation (this target) | Without |
 |---|---|---|
 | setting manual breakpoints | supported; multi-dap never touches them | supported |
 | halt | supported; published as a normal transition | supported |
@@ -593,11 +688,36 @@ protocol does not provide. It is: **MULTI Bridge Protocol v1, NDJSON over loopba
 ### 7.1 Transport
 
 ```
-mpythonrun -f bridge.py -args --rpc-port <port>
+mpythonrun -f bridge.py -args \
+  --rpc-host 127.0.0.1 --rpc-port 0 --ready-file <private-ready-path>
 ```
 
 `bridge.py` binds its own port and owns the MBP socket. Go never parses the `GHS-Py>` prompt
-or the `$` meta commands of the mpythonrun REPL socket.
+or the `$` meta commands of the mpythonrun REPL socket. Port zero is the normal startup path:
+after `bind()` and before `accept()`, the bridge atomically publishes the numeric loopback host
+and kernel-selected port to a private, bounded ready file. Go validates that file, connects once,
+and consumes the mandatory MBP handshake. The file is rendezvous metadata only; it carries no
+token, target argument, or program identity and is removed with the owned bridge process state.
+
+For recovery, the launcher also carries the live MULTI service-router coordinates:
+
+```text
+mpythonrun -sr_connect_servicerouter_host 127.0.0.1 \
+  -sr_connect_servicerouter_port <session-port> -f bridge.py -args \
+  --rpc-host 127.0.0.1 --rpc-port 0 --ready-file <private-ready-path>
+```
+
+The service router is part of the long-lived debugger session, not part of the disposable bridge.
+Launching `mpythonrun` without those coordinates creates a private router and a second
+`multi.exe`; on the measured installation that second Debugger also requested another CodeMeter
+license and failed. The router port is discovered runtime state and is never a fixed project value.
+
+**`mpythonrun` must be launched with its own console and with its standard handles left
+alone.** It writes stdout through `WriteConsole`; redirecting stdout to a pipe or a file
+raises a modal Windows dialog (`WriteConsole(handle=0x...) for STD_OUTPUT_HANDLE failed`) and
+the process stalls. The daemon therefore spawns it with `CREATE_NEW_CONSOLE` and captures
+nothing. This is independent support for the decision above: stdout was never a usable
+channel, so the bridge had to own a socket regardless.
 
 Fallback if M0-2 shows a resident socket loop cannot coexist with MULTI-Python calls: Go
 speaks the mpythonrun REPL socket directly, with all prompt-convergence logic confined to a
@@ -608,13 +728,18 @@ single file in the MULTI Driver.
 ```
 request   {"id":7,"method":"bp_set","params":{…}}
 response  {"id":7,"ok":true,"result":{…}}
-error     {"id":7,"ok":false,"error":{"kind":"multi_refused","message":"…","raw":"…"}}
+error     {"id":7,"ok":false,"error":{"kind":"multi_refused","message":"…","raw":""}}
 event     {"event":"…","params":{…}}
 ```
 
-The error envelope carries `raw`, MULTI's output. **`raw` is semantically uninterpreted by
-the bridge, and byte-exact unless `raw_lossy` is true** (§7.5). Debugger Core decides how to
-present it. Raw replies are never consumed by an intermediate layer.
+The error envelope retains `raw` as a required MBP v1 compatibility field, but the bridge always
+sets it to the empty string. `BridgeError` does not retain or decode target output, unexpected
+exceptions are not stringified, and Go, DAP, and CLI surfaces receive only the stable `kind` and
+sanitized `message`. Target diagnostics never cross the error boundary.
+
+Successful typed `run_commands` results are the only MBP values that may contain MULTI command
+text. They are consumed and validated inside `internal/multi`; no raw success reply is forwarded to
+Debugger Core, DAP, or CLI.
 
 Handshake fields: `protocol_version`, `bridge_version`, `max_message_size`,
 `encoding = "utf-8"`. A version mismatch is a hard startup failure — no compatibility
@@ -629,22 +754,62 @@ session    open  close  download  reset  state  stop_info  cores
 execution  resume  halt  step_over  step_in  step_out  run_to
 breakpoint bp_set  bp_clear  bp_list
 inspection stack  locals  globals  eval  regs  mem_read  mem_write  disasm     ← provisional
-escape     run_commands   → raw text
+console    console_read console_reset → bounded Target/I/O snapshots and local cursor reset
+escape     run_commands   → typed result carrying internal-only command text
 ```
 
-**The inspection group is provisional until M0-4 and must not be frozen by schema contract
-tests yet.** DAP's variable model is a lazily expanded tree with paging, so a flat
-`locals()` that recursively serializes an entire object graph is not a viable contract. The
-likely shape after M0-4 is closer to:
+**The inspection group is now settled by M0-4.** MULTI exposes no structured inspection API at
+all — `GHS_Debugger` has no stack, locals, or evaluate method — so inspection goes through
+command text captured from `cmdExecOutput`. The text is rich enough for DAP's lazy paged tree:
+one-level expansion exists (`print <path>` on any sub-expression) and array elements are
+individually addressable by index. The contract is therefore
 
 ```
-locals(frame)
-children(value_ref, start, count)
-eval(frame, expr)
+locals(frame)                     -> e <frame> ; l
+children(value_ref, start, count) -> print <path> per element
+eval(frame, expr)                 -> print <expr>
 ```
 
-with an opaque MULTI value locator. The deliverable of M0-4 is explicitly "finalize the
-inspection contract", not merely "check that locals works".
+with **the expression path string as the opaque MULTI value locator**. No handle is invented on
+the MULTI side; Debugger Core maps its own `variablesReference` to a path. Failures are uniform:
+`Unknown name "<identifier>" in expression.` with `cmdExecStatus = 0`.
+
+This text-to-handle boundary treats input as untrusted: the inspection parser limits each output,
+the number of lines, and individual line length; the backend must first return and validate a
+**complete snapshot** before applying DAP paging or allocating variable handles, so malformed
+off-page values cannot leave partial handles. Structured-locator identifiers accept ASCII grammar
+only; command separators and all control characters are rejected. These are parser/service host
+test invariants, not an expansion of MULTI text grammar or hardware validation.
+
+The parsers for `calls`, `l`, `l @`, `l g`, `l S`, `l r`, `e`, `print`, `B`, and `H` live in the
+MULTI Driver package, which §5 explicitly permits, and are pinned by golden fixtures captured
+from hardware.
+
+`state` and `stop_info` collapse into one MBP request. To prevent a torn observation, that request
+brackets `GetCurPrInfo("")` with `GetStatus()` before and after it and rejects the sample if the two
+status values differ; it never retries in the bridge. The process dictionary supplies the stop
+generation and detail. It returns 173 fields in 9–30 ms, including `stopStamp`, `pc`,
+`file`, `iln`, `proc`, `stackdepth`, and the stop-condition flags, but it has no reliable canonical
+running/stopped field. It is undocumented, so the captured field set is the contract and is
+governed by the same discipline §7.4 imposes on `run_commands`.
+
+The implemented bridge allowlist is deliberately narrower than the final table: `open`, `close`,
+`state`, `cores`, `resume`, `halt`, `step_in`, `next`, `console_read`, `console_reset`,
+`memory_read`, `disassemble`, and the disciplined `run_commands` escape. `console_read` uses
+MULTI's `savedebugpane target/io` command to take
+bounded snapshots in the bridge's private ready-file directory and returns only the increment
+since the previous snapshot. Target-server text and target-program I/O remain separate through
+the actor and become DAP `stdout` output events. Adapter warnings use `stderr`; CLion's Cidr
+frontend does not surface DAP `category=console` in its process Console. The bridge never
+writes either stream to its own stdout, where it would corrupt DAP framing.
+`console_reset` changes only the bridge's two local increment cursors. Each new DAP frontend
+invokes it through the actor before `configurationDone` releases the polling barrier, so the
+next bounded read replays the panes visible at attach time; it sends no MULTI command and does
+not change target state. `memory_read` and `disassemble` retain the stopped/core-routed M5 bounds
+described in §6.4; no target write method is exposed.
+The two stepping methods use the non-blocking M0-8 Python calls. `step_out`, `run_to`, `download`,
+and `reset` remain unavailable until their exact MULTI primitives have been verified; a guessed
+command spelling is not a protocol contract.
 
 ### 7.4 `run_commands` discipline
 
@@ -666,8 +831,9 @@ otherwise surface as corrupted output at the worst moment:
 
 - the wire is UTF-8 bytes
 - every outbound string in the bridge is converted to `unicode` before encoding
-- undecodable bytes from MULTI use `errors="replace"`, and the message is flagged
-  `raw_lossy: true` so Debugger Core knows that `raw` is not byte-exact evidence
+- undecodable bytes in a successful command result use `errors="replace"`, and that result is
+  flagged `raw_lossy: true` so `internal/multi` knows its command text is not byte-exact evidence;
+  the flag does not apply to error envelopes, whose reserved `raw` field is always empty
 - Windows paths travel with forward slashes, case preserved, and are **not** normalized —
   MULTI's path comparison behavior is unverified, so multi-dap does not silently rewrite
 
@@ -679,21 +845,23 @@ debugger. Exposure is therefore constrained by design, not by deployment habit:
 | Channel | Binding |
 |---|---|
 | MBP control | random port on `127.0.0.1` / `::1` only |
-| hint | random UDP port on loopback only, plus a per-session nonce |
+| hint (optional; not integrated into the runtime) | loopback UDP receiver/protocol seam, optionally with a per-session nonce |
 | DAP | loopback by default |
 | remote DAP | explicit opt-in, and requires a separate transport security design |
 
-A forged hint can at worst provoke one `state()` call, but the session nonce is still
-required so that any local process cannot generate hint floods for free. Hint tokens are
-random and unguessable for the same reason.
+Even if enabled in the future, a forged hint must trigger at most one `state()`; the nonce is the
+boundary that prevents cost-free flooding by any local process. The current strict breakpoint
+identity does not depend on UDP: it comes from the command list's `mprintf` token and is parsed
+from `H` after the target stops.
 
 ## 8. Event channels
 
-Two channels, deliberately separate.
+The control channel is integrated; the hint receiver and notifier remain optional design seams and
+are not integrated into the daemon runtime.
 
 **Control — TCP, request/response.** Go → `bridge.py`.
 
-**Hint — UDP loopback, one-way.** Injected breakpoint code → Go.
+**Hint (optional) — UDP loopback, one-way.** Injected breakpoint code → Go.
 
 The hint channel does not reuse the control connection. When MULTI hits a breakpoint while
 the bridge is inside a call such as `Resume()`, re-entering the bridge's own runtime to
@@ -704,25 +872,20 @@ handshake, no back-pressure, and no way to stall the debugger when the listener 
 TCP `connect` can block MULTI's command loop even with a timeout. Loss is acceptable because
 polling is the source of truth (§6.3).
 
-**Notifier preloading.** The debugger's in-process Python interpreter is a different context
-from the `mpythonrun` process, so a function defined in `bridge.py` does not exist there.
-The daemon therefore sets `AFTER_GHS_STARTUP_PYTHON` to a small `notifier.py` when it
-launches MULTI, so every MULTI-Python context comes up with `notify` already defined. A
-breakpoint command list then contains only the shortest possible call, carrying the
-Go-generated hint token (§6.5):
+**Notifier preloading (unimplemented candidate path).** The debugger's in-process Python and
+`mpythonrun` are different contexts, so functions defined in `bridge.py` do not appear
+automatically. The repository may contain `notifier.py` and a UDP receiver, but the daemon **does
+not** install an `AFTER_GHS_STARTUP_PYTHON` hook, and it must not be described as a working
+notification path. The current breakpoint command list writes only a strict `mprintf` token,
+which is parsed from `H`'s command list after the target stops:
 
 ```
-b foo#12 {python -s "notify(0x9F2C41A7)"}
+b foo#12 {mprintf("HIT 0x9F2C41A7\n")}
 ```
 
-The notifier sends one UDP datagram carrying the token and the session nonce, and swallows
-every exception. An exception raised inside a breakpoint command list would contaminate
-MULTI's command execution.
-
-**Known hazard:** `$restart` discards the Python context. If the startup hook does not re-run,
-`notify` disappears and the hint channel dies silently. M0-5 must measure this, and
-regardless of the result, Debugger Core must remain correct with the hint channel permanently
-dead — subject to the stop-reason qualification in §6.3.
+If a notifier is integrated in the future, it then sends a token/nonce UDP datagram and swallows
+exceptions; exceptions must not contaminate breakpoint-command execution. Whether or not this path
+exists, the stop arbiter must remain correct without hints.
 
 ## 9. Session lifecycle
 
@@ -732,7 +895,9 @@ re-downloads.
 
 ### 9.1 Daemon
 
-- CLion / VS Code / Zed connect in **attach** mode over loopback TCP
+- CLion and VS Code start a local stdio `proxy`; Zed/other clients may use loopback TCP. Every
+  supported frontend must send DAP **attach** and must not silently convert `launch` into target
+  attachment.
 - exactly one DAP client at a time; a second attach is refused with a clear error rather
   than silently taking over
 - mutating control requires the lease of §6.9
@@ -740,6 +905,36 @@ re-downloads.
 Commands: `serve`, `status`, `shutdown`, `doctor`, plus `proxy` (stdio front-end that
 forwards to the daemon) so an IDE that insists on launching its own adapter process needs no
 architectural change.
+
+The supported editor path is `proxy --config <absolute-project.toml>`. It binds
+the owner-only record to a versioned SHA-256 digest of every normalized,
+validated runtime field before authenticating or forwarding DAP. Record paths
+and the physical-probe lock remain keyed by `probe.id`; a same-ID record with a
+different semantic digest fails closed and is neither reused nor removed.
+`proxy --probe-id <id>` remains only as an explicit legacy identity-only escape
+hatch and is not the CLion contract. A stable ID and the semantic digest are not
+control credentials.
+
+`proxy` does not first query `status` with a control token and then create a second connection to
+the returned `DAPAddress`. After receiving an upgrade ACK on the same authenticated control socket,
+it directly calls the daemon's `dap.Server.ServeConnection`. Control authentication and DAP
+ownership are therefore bound to the same TCP connection, and a loopback-listener rebind after the
+daemon exits cannot insert a TOCTOU race between status and dial.
+
+CLion's Before Launch runs a synchronous, short-lived `ensure`. It first requires the live
+control record to match the validated configuration digest and then authenticates it; if present,
+it returns `already_ready` directly. Otherwise,
+acquisition must be chosen explicitly by the caller: the default and explicit `warm` require the
+configured exact primary ELF and bind only one existing window; explicit `cold` forbids a primary
+ELF and router arguments and directly derives `serve --session-mode cold`. Neither mode falls back
+to the other. Concurrent ensure calls converge on one daemon through an owner-only control
+reservation, and the daemon runtime's probe lock then prevents duplicate use that bypasses the
+control record. The parent passes its expected digest to the child, which compares it immediately
+after loading TOML and before reserving control state or starting the runtime; a configuration
+change between the two reads therefore fails before MULTI is touched. The parent terminates only
+the serve child it created when readiness fails; on
+Windows, the ensure child and its descendants are in a kill-on-close Job, and other MULTI sessions
+are never cleaned up by process name.
 
 ### 9.2 Attach sequence
 
@@ -771,17 +966,23 @@ state — the internal churn of the attach sequence is never streamed to the cli
 
 ### 9.3 Disconnect policy
 
-`disconnect` detaches only: MULTI keeps running, the target is not reset, nothing is
-re-downloaded, execution state is unchanged, and DAP-owned breakpoints are removed (§6.5).
+`disconnect` only detaches: MULTI is not reset or re-downloaded. DAP-owned breakpoints transfer to
+stopped-bound cleanup under §6.5; non-perturbation of `bp_clear` while running is unverified, so
+they cannot be guaranteed to be removed immediately on disconnect.
 
 This is an explicit DAP compatibility decision. The general DAP model for attach sessions is
 that the debuggee continues after disconnect, and the protocol later added `suspendDebuggee`
-to express whether it should stay suspended. M6 must verify what VS Code, Zed, and CLion
-each expect when disconnecting from a *stopped* target, and the policy is revisited against
-those findings rather than assumed correct.
+to express whether it should stay suspended. The local CLion 2026.2.1 implementation sends an
+explicit `terminateDebuggee:false` for detach; the frontend accepts explicit false but continues
+to fail closed for `terminateDebuggee:true` or `suspendDebuggee:true`. A limited
+native CLion GUI-and-hardware smoke test has covered cold attach, stacks,
+top-level inspection, read-only memory/disassembly, and breakpoint
+synchronization. Actual breakpoint hits, full execution control, and real
+disconnect-safety qualification remain open; VS Code and Zed still require
+independent GUI/hardware acceptance.
 
-The claim that execution state is unchanged also depends on `bp_clear` not perturbing a
-running target (§6.5, verified in M0-7).
+The current policy does not proactively change execution state for cleanup during disconnect; this
+does not mean the hardware safety of `bp_clear` has been verified.
 
 ### 9.4 Lifecycle capabilities are configuration, not hard-coded policy
 
@@ -799,22 +1000,46 @@ When enabled, `resume` after a download is refused in Debugger Core until a `res
 happened — enforced mechanically, not documented as advice. The default is `true` because
 the failure mode is silent and expensive to diagnose.
 
+Cold connection preparation is independently explicit:
+
+```toml
+[connection]
+preparation = "already_present_no_verify"
+```
+
+This mode is restricted to cold acquisition. After `ConnectToTarget` succeeds, the bridge runs
+the documented `prepare_target -verify=none` command on the retained Debugger window. It is the
+MULTI “Program already present on target / Verify: Not At All” action and does not download,
+flash, reset, or verify target memory. Omitted preparation and `"none"` are inert. Warm acquisition
+rejects the field, and an input-requiring MULTI response fails the startup instead of opening or
+automating a dialog. After a successful cold `ConnectToTarget`, preparation is transactional: a
+refusal or exception first issues exactly one `Disconnect(0)` before reporting the sanitized
+preparation failure. A disconnect failure is reported as a separate cleanup failure and is never
+represented as a successfully cleaned session.
+
 ## 10. Error handling and recovery
 
 | Class | Handling |
 |---|---|
 | Configuration error | `serve` refuses to start; never surfaces as a debug-session failure |
 | Startup failure (MULTI, probe, license) | diagnosed and reported by specific cause; never a generic "connection failed" |
-| **Daemon duplicate** | single-instance lock keyed by the configured probe identity; a second daemon refuses to start and prints the holder's PID. Proves only that another *multi-dap daemon* holds this configuration |
+| Cold bootstrap after confirmed `open` | If `open` in the same bridge generation has explicitly succeeded and `cores` or initial state subsequently fails, the Actor queues a typed `close` rollback; both bootstrap and rollback errors are retained |
+| Warm bootstrap / unconfirmed `open` | **Never** send `close`; they do not prove multi-dap ownership of an existing MULTI session |
+| **Daemon duplicate or binding collision** | single-instance lock and record path keyed by the configured probe identity; matching semantics converge, while a same-ID record or startup marker with a different validated digest fails closed without reuse, deletion, authentication, or shutdown. This proves local configuration identity, not hardware serial identity |
 | **External probe contention** | a separate error class: the probe is held by a process multi-dap does not manage (a MULTI GUI, a stray target server). Detected from the target server's own failure, reported with evidence |
 | Leftover processes | detected at startup and **reported, not killed**; `doctor` prints executable paths and parent/child PIDs so a human decides |
-| MULTI refused a command | `raw` forwarded, semantically uninterpreted (§7.2); DAP error response |
+| MULTI refused a command | bridge emits a stable `kind` and sanitized `message`; reserved `raw` remains empty; DAP error response carries no target diagnostic |
 | Illegal target state (resume before reset, when required) | refused in Debugger Core; nothing is sent to the bridge |
 | Timeout | only Go sets deadlines; the bridge sets none |
 | Bridge death | DAP `terminated` is emitted; the daemon does not pretend the session is alive; target state is preserved |
 | Unexpected GUI-initiated change | reconciled and published (§6.8); reset/download by GUI is reported as a session fault |
 
 The bridge never retries. Retry and backoff policy live in Debugger Core.
+
+Rollback can also be indeterminate because of transport poison, a stale generation, or MULTI
+refusal. In that case, no speculative second close is attempted; the Actor is placed in
+fail-closed/reconciliation-required. Lifecycle host tests cover this close policy, which does not
+imply that cold or warm hardware sessions are recoverable.
 
 **Poisoned connections.** A Go deadline can stop waiting; it cannot cancel an in-flight
 MULTI-Python call. Once an RPC deadline expires, the bridge and its connection are marked
@@ -823,10 +1048,16 @@ completion from the previous generation is discarded on arrival (§6.1) — a st
 returns minutes later must never be mistaken for a current result. What recovery is possible
 depends on M0-1:
 
-- if `mpythonrun` can attach to an existing MULTI session: kill the bridge, restart
-  `mpythonrun`, reconnect to the live MULTI session, resynchronize state
+- while the MULTI service router is healthy **and the exact Window Register program binding has
+  been proven for this project**: kill the bridge, restart `mpythonrun` with the router's loopback
+  host/port, bind the unique live program window without reconnecting the emulator, resynchronize
+  state
 - if it cannot: an RPC timeout effectively loses the debug session, which becomes a
   documented product limitation
+
+A dead service router is not the same recoverable case as a dead bridge. Restarting without the
+old router starts a second MULTI world, may consume another license, and cannot be treated as
+reattachment to preserved state.
 
 This makes M0-1 a fault-recovery question, not merely a lifecycle question.
 
@@ -844,6 +1075,14 @@ This makes M0-1 a fault-recovery question, not merely a lifecycle question.
 - **Fencing tests.** A completion from a superseded `BridgeGeneration` or
   `FrontendGeneration` must be discarded, including the case where it arrives after a
   successful reconnect.
+- **Transaction/race tests.** The breakpoint state lock does not span `Set`/`Clear`, the detach
+  fence does not let an old owner revive after a concurrent transaction, and natural cleanup retry
+  is bounded for every `StopEpoch`. These do not replace M0-7.
+- **Bootstrap/proxy tests.** Only a confirmed cold `open` may be typed-closed after `cores`/initial
+  state fails; warm/unconfirmed open may not be closed. Proxy-upgrade validation does not dial the
+  recorded `DAPAddress`, so a listener rebind cannot hijack DAP.
+- **Inspection adversarial tests.** Host tests cover parser input limits, prior validation of a
+  complete snapshot, locator ASCII/control rejection, and absence of partial handle leakage.
 - **Transition tests.** Externally-initiated transitions produce `continued` then `stopped`
   in order; a missed cycle detected by stop generation produces the same pair late rather
   than being dropped.
@@ -854,30 +1093,45 @@ This makes M0-1 a fault-recovery question, not merely a lifecycle question.
 
 ## 12. Milestones
 
-**M0 — reconnaissance on hardware. Nine blockers. Nothing is built until these are
-answered, because each can invalidate part of the architecture.**
+**M0 — hardware reconnaissance. The status in the table below is authoritative; observed facts,
+probes not yet run, and future architecture candidates are strictly distinguished. Full evidence
+is in [m0-findings.md](m0-findings.md).**
 
-| # | Question | What it can change |
-|---|---|---|
-| 1 | Can `mpythonrun` attach to an existing MULTI session, or only create its own? | session lifecycle *and* the fault-recovery model (§10) |
-| 2 | Can a Python 2.7 script inside `mpythonrun` run a resident socket loop while MULTI-Python calls are made, or is there a threading restriction? | transport (§7.1) |
-| 3 | `python` is GUI only — can the MULTI window be hidden or minimized in daemon mode without losing function? | daemon presentation |
-| 4 | **Finalize the inspection contract.** How much structured data do stack / locals / eval yield, is the type information sufficient for DAP variables, and how are children expanded and paged? | §7.3 method table |
-| 5 | Breakpoint Python execution context: is it the same interpreter as `mpythonrun` (expected: no), does the `AFTER_GHS_STARTUP_PYTHON` preload make `notify` reachable, does executing it block MULTI's command loop, what happens on rapid repeated hits, does `$restart` re-run the hook? | §8 hint channel |
-| 6 | `state()` polling: cost, blocking behavior, and — most important — **does it perturb the target?** If reading state requires halting a running core, polling destroys real-time behavior and "polling is the truth" collapses, leaving only the unreliable hint channel. **Highest-risk item.** | §6.3 entire event model |
-| 7 | Does `bp_clear` perturb a running target? | §9.3 disconnect contract |
-| 8 | **Execution primitive blocking semantics.** Do `Resume` / `step_*` return immediately after starting execution, or block until the target stops? While a `Resume()` is outstanding, can `Halt` / `state` be issued from another MULTI-Python context? | §6.1 actor/executor structure; possibly forces a second control channel |
-| 9 | **Stop-reason and stop-generation observability.** Can MULTI report *why* it stopped — reason, stopped core, breakpoint identity or address, exception/fault information? And does it expose a monotonic stop generation, sequence, or equivalent field that changes on every stop, so that two consecutive `Stopped` samples with an unobserved run between them are distinguishable? | §6.3 stop arbiter and DAP `stopped` fidelity; **gates the GUI coexistence policy of §6.8** |
+| # | Question | Status | What it changed |
+|---|---|---|---|
+| 1 | Can `mpythonrun` attach to an existing MULTI session, or only create its own? | **Answered for acquisition.** Same-router, exact-full-path warm binding has passed; repeating cold connect remains unsafe | automatic recovery remains fail-closed because a blocked window command has no supported cancel/timeout |
+| 2 | Can a Python 2.7 script inside `mpythonrun` run a resident socket loop while MULTI-Python calls are made? | **Open.** `socket` and `threading` import cleanly; probe written | §7.1 stands provisionally |
+| 3 | `python` is GUI only — can the MULTI window be hidden or minimized in daemon mode? | **Substantially answered.** The whole capture ran minimized with no loss of function; `goaway` / `comeback` are documented for exactly this | daemon presentation |
+| 4 | **Finalize the inspection contract.** | **Answered.** No structured API; command text only, but one-level expansion and array indexing both work | §7.3 frozen; expression path is the value locator |
+| 5 | Breakpoint Python execution context | **Half answered.** Command lists can be set, listed, and fired, and are reported back by `H`; Python in a command list is untested | The current identity is a strict `mprintf` token plus `H` parsing; UDP/notifier remains an optional seam |
+| 6 | `state()` polling: cost, blocking behavior, and **does it perturb the target?** | **Open — highest risk.** `GetStatus()` costs 0.71 ms, `GetCurPrInfo("")` 9–30 ms; the differential experiment now fail-closes unless its configured target progress expression is readable | §6.3 entire event model |
+| 7 | Does `bp_clear` perturb a running target? | **Open.** The safe warm-only probe has not run | Transfer owner after disconnect and wait for natural stopped-epoch cleanup |
+| 8 | **Execution primitive blocking semantics.** | **Answered.** `block` is an explicit parameter; `Resume(block=0)` returns in <1 ms; MULTI-Python's blocking mode is a client-side poll loop | **§6.1's second-control-channel branch does not fire** |
+| 9 | **Stop-reason and stop-generation observability.** | **Answered.** `stopStamp` increments by one on every confirmed stop and never otherwise; `H` plus the flag fields give the reason | **§6.8 holds in its supported form**; `StopEpoch` derives from `stopStamp` |
 
 **M1** — daemon, attach sequence (§9.2), `state`, `resume` / `halt`; a client connects and
 sees core state. Early in M1, validate DWARF scanning for the source index (§6.6).
-**M2** — breakpoints and stop events, both channels, arbiter and epochs.
-**M3** — stack, scopes, variables, evaluate. This is the threshold where the IDE crosses
-from "can control the target" to "can debug source".
-**M4** — stepping: over, in, out, run-to.
-**M5** — memory, registers, disassembly.
-**M6** — VS Code, Zed, and CLion validation including disconnect expectations (§9.3);
-packaging and distribution.
+
+The delivery status below does not change the final architecture and acceptance scope defined in
+the preceding sections:
+
+| Milestone | Integrated scope | Explicitly uncommitted scope |
+|---|---|---|
+| **M2** | breakpoint/stop arbiter, owned breakpoint, stop-epoch/deduplication; state lock does not span `Set`/`Clear`, detach fence, and bounded retry per epoch; p12-validated `l f` source resolver and per-Resolve snapshot; direct DAP Set/Clear and native CLion synchronization on a stopped target | The transaction behavior above is primarily host/race evidence and does not replace M0-7; source breakpoints fail closed when any configured core lacks definitive `Presence`; actual hits await acceptance |
+| **M3** | top-level stack frame, one-level aggregate children, service snapshot paging, parser/snapshot/locator failure boundaries | variable type/paging is negotiated by client `initialize`; hover, format, and non-top-level frames fail closed |
+| **M4** | `next` and `stepIn` transport/control path for one configured core | multi-core requires an `ExecutionDomain` with complete before/after observation; it has no production executor and is refused before I/O; `stepOut` and run-to are unproven; p04 has not run |
+| **M5** | stopped/core-routed `readMemory`; RH850 `disassemble` (actual opcode bytes); stop-bound frame PC reference; CLion hardware acceptance at 8/32/128/256 lines | `writeMemory`, registers, nonzero `instructionOffset`, automatic pointer-variable memory references, and instruction-level stepping fail closed |
+| **M6** | config-bound `status`, `shutdown`, `diagnose`, and same-socket `proxy` upgrade; deterministic packaging; VS Code local proxy source extension; CLion 2026.2.1 Cidr DAP CMake Debug/framing/disconnect-false contract; and bounded native CLion hardware smoke | legacy `proxy --probe-id` is identity-only; breakpoint-hit and execution acceptance, VS Code GUI, Zed, and stopped-target hardware disconnect await acceptance |
+
+The warm-session router host/port and primary ELF are runtime inputs to `serve`, not project TOML.
+Binding accepts only a window whose full path is unique in the Window Register, whose state is
+stable, and whose process information is nonempty; failure of any threshold is refused, with no
+fallback to a second router, cold reconnect, basename, or first window. This binding and the
+program-component topology of the two configured cores have passed on a stopped target. A read-only
+phase probe after the latest native CLion attempt shows that Window Register enumeration still
+succeeds, but the first debugger `GetProgram()` blocking `RunCommands` received no reply; the public
+interface has no call-level cancel/timeout. The current gate is therefore for an operator to restore
+command dispatch in that debugger window before continuing the Cidr smoke test.
 
 ## 13. Open questions
 
@@ -908,7 +1162,7 @@ packaging and distribution.
 | Logical breakpoints are atomic across cores | `verified = false` while a breakpoint is quietly live on one core is the more damaging failure; ownership records survive so orphans can be retried | Best-effort partial breakpoints |
 | Handles invalid the moment execution resumes, keyed by session-global `StopEpoch`, with monotonic IDs | Matches DAP's suspended-state reference lifetime; monotonic IDs make stale references fail loudly instead of resolving to a different live object | Validity until the next stop; per-core epochs; resetting the ID allocator after each resume |
 | Go-generated opaque hint tokens | The command list needs an identity before MULTI assigns a handle; also keeps DAP concepts out of the bridge and avoids assuming MULTI handles are globally unique | Passing the MULTI breakpoint handle to the notifier |
-| UDP loopback for hints, separate from control TCP, with a session nonce | Cannot stall MULTI's command loop; loss is acceptable because polling backstops; the nonce makes local hint floods non-free | Reusing the bridge's control connection for notifications |
+| UDP loopback for hints, separate from control TCP, with a session nonce (candidate) | If integrated in the future, it can avoid blocking the MULTI command loop; polling covers loss, and the nonce limits local flooding | Reusing the bridge's control connection for notifications |
 | Loopback-only binding as an architectural invariant | The bridge can resume, reset, and write memory; a DAP client has full debugger control | Treating listener exposure as a deployment concern |
 | Cores as DAP threads, single-thread execution advertised false | Honest about the freeze group instead of simulating per-core control | Pretending per-thread stepping works |
 | MCP as a frontend above Debugger Core, gated by a control lease | Preserves the single-owner property; serialization alone does not prevent conflicting intent between two controllers | Hanging an MCP shim beside the DAP server on the same bridge; relying on the actor alone to arbitrate two frontends |
