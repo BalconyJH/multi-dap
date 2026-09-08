@@ -1,7 +1,21 @@
 recon/out/
 recon/config.local.json
+/project.toml
+/*.local.toml
 *.exe
 *.pyc
+__pycache__/
+
+# Local editor and document-extraction state.
+.idea/
+/tmp/
+/dist/
+/site/
+/docs/.venv/
+/editors/vscode/node_modules/
+/editors/vscode/*.vsix
+coverage.out
+*.test
 
 # exploratory hardware capture; contains target symbol names
 .hwscratch/
