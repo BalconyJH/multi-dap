@@ -488,6 +488,15 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(command.endswith('" 0x10 4'))
         self.assertFalse(os.path.exists(self.bridge._inspection_file()))
 
+    def test_inspection_component_accepts_byte_string_from_python2_json(self):
+        self.open_bridge()
+        self.window.memory_output = b"\x7f"
+        result = self.bridge.memory_read({
+            "component": b"debugger.name.4", "address": 0, "byte_count": 1,
+        })
+        self.assertEqual("fw==", result["data"])
+        self.assertEqual(1, result["byte_count"])
+
     def test_memory_read_rejects_unsafe_or_wrong_length_requests(self):
         self.open_bridge()
         self.window.memory_output = b"\x00"

@@ -301,7 +301,11 @@ class MultiBridge(object):
         component = params["component"]
         address = params["address"]
         count = params[count_name]
-        if not isinstance(component, unicode) or not COMPONENT_ID_PATTERN.match(component):
+        try:
+            component = as_unicode(component)
+        except BridgeError:
+            raise BridgeError("invalid_params", "component is invalid")
+        if not COMPONENT_ID_PATTERN.match(component):
             raise BridgeError("invalid_params", "component is invalid")
         for value, label, limit in ((address, "address", None), (count, count_name, maximum)):
             if isinstance(value, bool) or not isinstance(value, (int, long)) or value < 0:
