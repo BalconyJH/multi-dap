@@ -1,5 +1,6 @@
 """Host-side client for the two phases of p02_socket.py."""
 
+import io
 import json
 import os
 import socket
@@ -12,16 +13,17 @@ PHASE_FILE = os.path.join(OUT, "p02_port.json")
 RESULT = os.path.join(OUT, "p02_client.json")
 REQUESTS = 64
 TIMEOUT = 45.0
+MONOTONIC_CLOCK = getattr(time, "perf_counter", time.time)
 
 
 def wait_for_phase(name, deadline):
     while time.time() < deadline:
         try:
-            with open(PHASE_FILE, encoding="utf-8") as fh:
+            with io.open(PHASE_FILE, "r", encoding="utf-8") as fh:
                 state = json.load(fh)
             if state.get("phase") == name:
                 return int(state["port"])
-        except (OSError, ValueError, KeyError):
+        except (IOError, OSError, ValueError, KeyError):
             pass
         time.sleep(0.05)
     raise RuntimeError("timed out waiting for phase %s" % name)
@@ -33,10 +35,10 @@ def run_phase(name, port):
     latencies = []
     try:
         for index in range(REQUESTS):
-            started = time.perf_counter()
+            started = MONOTONIC_CLOCK()
             sock.sendall(("ping %d\n" % index).encode("ascii"))
             reply = stream.readline()
-            latencies.append(time.perf_counter() - started)
+            latencies.append(MONOTONIC_CLOCK() - started)
             if reply != b"pong\n":
                 raise RuntimeError("unexpected reply %r" % (reply,))
         sock.sendall(b"done\n")
@@ -60,8 +62,8 @@ def main():
     for phase in ("threaded", "select"):
         port = wait_for_phase(phase, deadline)
         results.append(run_phase(phase, port))
-    with open(RESULT, "w", encoding="utf-8") as fh:
-        json.dump({"phases": results}, fh, indent=2, sort_keys=True)
+    with open(RESULT, "wb") as fh:
+        fh.write(json.dumps({"phases": results}, indent=2, sort_keys=True).encode("utf-8"))
     print(RESULT)
 
 
