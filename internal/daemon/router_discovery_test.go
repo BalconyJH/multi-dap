@@ -54,3 +54,24 @@ func TestDiscoverWarmSessionRequiresExactlyOneVerifiedRouter(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyWarmRouterPassesPythonVersion(t *testing.T) {
+	cfg := testRuntimeConfig()
+	cfg.Multi.PythonVersion = config.PythonVersion2
+	script := testBridgeScript(t)
+	fake := newRuntimeFakeBridge(t)
+	previous := startWarmBridge
+	t.Cleanup(func() { startWarmBridge = previous })
+	var launched bridge.LaunchSpec
+	startWarmBridge = func(_ context.Context, spec bridge.LaunchSpec) (bridgeProcess, error) {
+		launched = spec
+		return fake, nil
+	}
+	warm := WarmSession{ServiceRouterHost: "127.0.0.1", ServiceRouterPort: 40123, PrimaryELF: `C:\fixture\core0.elf`}
+	if err := verifyWarmRouter(context.Background(), cfg, script, warm); err != nil {
+		t.Fatalf("verifyWarmRouter() error = %v", err)
+	}
+	if launched.PythonVersion != config.PythonVersion2 {
+		t.Fatalf("warm launch Python version = %d, want %d", launched.PythonVersion, config.PythonVersion2)
+	}
+}

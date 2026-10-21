@@ -157,6 +157,7 @@ func startWith(ctx context.Context, options Options, start bridgeStarter) (*Runt
 	process, err := start(startup, bridge.LaunchSpec{
 		Executable:    options.Config.Multi.Executable,
 		BridgeScript:  script,
+		PythonVersion: options.Config.Multi.PythonVersion,
 		RPCPort:       options.Config.Endpoints.MBP.Port,
 		RPCHost:       options.Config.Endpoints.MBP.Host,
 		ServiceRouter: router,
