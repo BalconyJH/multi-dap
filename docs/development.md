@@ -11,7 +11,7 @@
 | `internal/dap/` | DAP framing, lifecycle, request validation, and response/event types. |
 | `internal/mbp/` | MULTI Bridge Protocol v1 messages and codec. |
 | `internal/multi/` | Strict parsers and MULTI operation runners. |
-| `bridge/` | Python 2.7-compatible mechanism bridge and Python 3 host tests. |
+| `bridge/` | Python 2.7/3.8-compatible mechanism bridge and Python 3 host tests. |
 | `recon/` | Hardware reconnaissance harness; never part of the release package. |
 | `editors/` | VS Code source extension and CLion configuration contract. |
 | `scripts/` | Deterministic packaging and release acceptance. |
@@ -53,8 +53,9 @@ database changes.
 
 ## Python host checks
 
-The production bridge runs under MULTI's Python 2.7. Host tests run under
-Python 3.12 and fake the Green Hills modules:
+The production bridge runs under MULTI's embedded Python 3 by default. Its
+source remains compatible with Python 2.7 for the explicit legacy fallback.
+Host tests run under Python 3.12 and fake the Green Hills modules:
 
 ```powershell
 uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest bridge.test_bridge
@@ -64,11 +65,13 @@ uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest di
 These tests prove compatibility logic, framing, sanitization, parsing, and
 bounded behavior. They do not open MULTI or connect to hardware.
 
-To byte-compile with the actual MULTI interpreter, pass its path to release
-acceptance:
+To byte-compile with an actual MULTI interpreter, pass its standalone
+`python.exe` path to release acceptance. Python 3 is preferred; use
+`-MultiPython2` only for the explicit legacy fallback. Do not pass
+`mpythonrun.exe`; it is a script runner rather than a standalone interpreter:
 
 ```powershell
-.\scripts\Invoke-WindowsReleaseAcceptance.ps1 -MultiPython C:\path\to\multi\python\python.exe
+.\scripts\Invoke-WindowsReleaseAcceptance.ps1 -MultiPython3 C:\path\to\multi\python-3.8.6\python.exe
 ```
 
 No probe is executed by this check.
@@ -133,7 +136,8 @@ Full mode is the release gate:
 .\scripts\Invoke-WindowsReleaseAcceptance.ps1 -Mode Full -Version 0.1.0-rc.1
 ```
 
-Full mode adds the race detector, optional MULTI Python 2 compilation, and two
+Full mode adds the race detector, preferred MULTI Python 3 compilation (with
+a Python 2 compatibility fallback), and two
 independent package builds whose archive digests and internal manifests must
 match. Both modes also verify that every GitHub Action is pinned to the reviewed
 commit and version in `.github/actions-lock.json`. Inspect the final
