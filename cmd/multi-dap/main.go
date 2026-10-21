@@ -57,8 +57,17 @@ type readyMessage struct {
 }
 
 type checkMessage struct {
-	Event string `json:"event"`
-	OK    bool   `json:"ok"`
+	Event              string `json:"event"`
+	OK                 bool   `json:"ok"`
+	MultiVersion       string `json:"multi_version,omitempty"`
+	MultiVersionSource string `json:"multi_version_source,omitempty"`
+}
+
+type multiVersionMessage struct {
+	Event   string `json:"event"`
+	Product string `json:"product"`
+	Version string `json:"version"`
+	Source  string `json:"source"`
 }
 
 type terminalMessage struct {
@@ -105,6 +114,8 @@ func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Wr
 			return usageError("version accepts no arguments")
 		}
 		return json.NewEncoder(stdout).Encode(version.Current())
+	case "multi-version", "detect-multi-version", "discover":
+		return runMultiVersion(ctx, args[1:], stdout)
 	case "serve":
 		return runServe(ctx, args[1:], stdout)
 	case "ensure", "start":
@@ -576,13 +587,81 @@ func runCheck(args []string, stdout io.Writer) error {
 	if flags.NArg() != 0 {
 		return usageError("doctor accepts no positional arguments")
 	}
-	if _, err := loadConfig(*configPath); err != nil {
+	validated, err := loadConfig(*configPath)
+	if err != nil {
 		return err
 	}
-	if err := json.NewEncoder(stdout).Encode(checkMessage{Event: "config_checked", OK: true}); err != nil {
+	if err := json.NewEncoder(stdout).Encode(checkMessage{
+		Event:              "config_checked",
+		OK:                 true,
+		MultiVersion:       validated.Multi.Version,
+		MultiVersionSource: validated.Multi.VersionSource,
+	}); err != nil {
 		return fmt.Errorf("write check message: %w", err)
 	}
 	return nil
+}
+
+// runMultiVersion defaults to metadata-only inspection. It deliberately accepts
+// either a complete project config or an installation directory so operators
+// can identify a MULTI release before filling in target-specific settings.
+func runMultiVersion(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("multi-version", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "", "project TOML configuration")
+	installation := flags.String("installation", "", "MULTI installation directory")
+	executable := flags.String("executable", "", "optional MULTI executable to inspect")
+	expected := flags.String("expected-version", "", "optional expected MULTI release")
+	allowExecutableProbe := false
+	flags.BoolVar(&allowExecutableProbe, "allow-executable-probe", false, "allow running the installation's gversion tool")
+	// Keep a concise spelling for scripts while making the opt-in explicit in
+	// both forms. Neither flag is enabled implicitly by --config or --executable.
+	flags.BoolVar(&allowExecutableProbe, "probe-executable", false, "alias for --allow-executable-probe")
+	if err := flags.Parse(args); err != nil {
+		return usageError(err.Error())
+	}
+	if flags.NArg() != 0 {
+		return usageError("multi-version accepts no positional arguments")
+	}
+	if strings.TrimSpace(*configPath) != "" && (strings.TrimSpace(*installation) != "" || strings.TrimSpace(*executable) != "" || strings.TrimSpace(*expected) != "") {
+		return usageError("multi-version accepts either --config or installation options")
+	}
+	var detected config.MultiVersion
+	var err error
+	if strings.TrimSpace(*configPath) != "" {
+		var loadErr error
+		var validated config.Validated
+		if allowExecutableProbe {
+			validated, loadErr = config.LoadWithExecutableProbeContext(ctx, *configPath)
+		} else {
+			validated, loadErr = config.LoadContext(ctx, *configPath)
+		}
+		if loadErr != nil {
+			return loadErr
+		}
+		detected = config.MultiVersion{Product: "MULTI IDE", Version: validated.Multi.Version, Source: validated.Multi.VersionSource}
+		if detected.Version == "" {
+			return errors.New("multi-version: configuration has no detectable MULTI release")
+		}
+	} else {
+		if strings.TrimSpace(*installation) == "" {
+			return usageError("--installation or --config is required")
+		}
+		detected, err = config.ResolveMultiVersionWithOptions(ctx, config.ResolveOptions{
+			Installation:         *installation,
+			Executable:           *executable,
+			Requested:            *expected,
+			RequireDetect:        true,
+			AllowExecutableProbe: allowExecutableProbe,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return json.NewEncoder(stdout).Encode(multiVersionMessage{
+		Event: "multi_version_detected", Product: detected.Product,
+		Version: detected.Version, Source: detected.Source,
+	})
 }
 
 func runDiagnose(args []string, stdout io.Writer) error {
@@ -659,5 +738,5 @@ type usageError string
 func (e usageError) Error() string { return string(e) + "\n" + usage() }
 
 func usage() string {
-	return "usage:\n  multi-dap version|--version\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n  multi-dap doctor|check --config <project.toml>\n"
+	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n  multi-dap doctor|check --config <project.toml>\n"
 }

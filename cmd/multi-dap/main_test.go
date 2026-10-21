@@ -174,6 +174,54 @@ func TestCheckIsDocumentedDoctorAlias(t *testing.T) {
 	}
 }
 
+func TestCheckReportsDetectedMultiVersion(t *testing.T) {
+	configPath := writeConfig(t)
+	installation := filepath.Join(filepath.Dir(configPath), "multi")
+	if err := os.WriteFile(filepath.Join(installation, ".about"), []byte("product = \"MULTI IDE\"\nversion = 0x1c5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installation, "defaults", "licensing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installation, "defaults", "licensing", "install_info.txt"), []byte("Product Release Name: MULTI IDE 8.1.4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{"check", "--config", configPath}, &output); err != nil {
+		t.Fatalf("run check: %v", err)
+	}
+	var message checkMessage
+	if err := json.Unmarshal(output.Bytes(), &message); err != nil {
+		t.Fatalf("decode check output %q: %v", output.String(), err)
+	}
+	if message.MultiVersion != "8.1.4" || message.MultiVersionSource != config.MultiVersionSourceInstallInfo {
+		t.Fatalf("check version fields = %#v", message)
+	}
+}
+
+func TestMultiVersionCommandIdentifiesInstallation(t *testing.T) {
+	configPath := writeConfig(t)
+	installation := filepath.Join(filepath.Dir(configPath), "multi")
+	if err := os.WriteFile(filepath.Join(installation, "install_summary.txt"), []byte("Installing \"MULTI IDE 8.1.4\" to \"x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{"multi-version", "--installation", installation, "--expected-version", "8.1.4"}, &output); err != nil {
+		t.Fatalf("run multi-version: %v", err)
+	}
+	var message multiVersionMessage
+	if err := json.Unmarshal(output.Bytes(), &message); err != nil {
+		t.Fatalf("decode multi-version output %q: %v", output.String(), err)
+	}
+	if message.Event != "multi_version_detected" || message.Product != "MULTI IDE" || message.Version != "8.1.4" || message.Source != config.MultiVersionSourceInstallSummary {
+		t.Fatalf("multi-version message = %#v", message)
+	}
+	output.Reset()
+	if err := run(context.Background(), []string{"discover", "--installation", installation}, &output); err != nil {
+		t.Fatalf("run discover alias: %v", err)
+	}
+}
+
 func TestServeWritesReadyAfterDaemonStartAndClosesOnCancellation(t *testing.T) {
 	configPath := writeConfig(t)
 	bridgeScript := filepath.Join(t.TempDir(), "bridge.py")
