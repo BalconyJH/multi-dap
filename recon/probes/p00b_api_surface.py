@@ -1,4 +1,4 @@
-# Python 2.7 - M0 recon probe: MULTI-Python API surface, no target contact.
+# MULTI Python 3/2 - M0 recon probe: MULTI-Python API surface, no target contact.
 # Introspects GHS_Debugger and everything reachable from it without connecting,
 # so the method table of docs/architecture.md 7.3 can be grounded in real API.
 #
@@ -17,10 +17,19 @@ MAX_DEPTH = 2
 def describe_callable(obj):
     info = {"kind": "callable", "doc": (inspect.getdoc(obj) or "")[:4000]}
     try:
-        argspec = inspect.getargspec(obj)
+        # Python 3.11 removed getargspec; MULTI 8 currently embeds 3.8,
+        # while older installations still expose the Python 2 API. Normalize
+        # both signatures into the same evidence shape.
+        get_full = getattr(inspect, "getfullargspec", None)
+        if get_full is not None:
+            argspec = get_full(obj)
+            keywords = argspec.varkw
+        else:
+            argspec = inspect.getargspec(obj)
+            keywords = argspec.keywords
         info["args"] = list(argspec.args)
         info["varargs"] = argspec.varargs
-        info["keywords"] = argspec.keywords
+        info["keywords"] = keywords
         info["defaults"] = repr(argspec.defaults)
     except Exception as exc:
         info["args_error"] = "%s: %s" % (type(exc).__name__, exc)

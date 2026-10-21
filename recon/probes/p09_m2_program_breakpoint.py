@@ -1,4 +1,4 @@
-# Python 2.7. M2 program-component paired breakpoint capability probe.
+# Python 3/2. M2 program-component paired breakpoint capability probe.
 #
 # This is warm-only and disabled by default.  It never opens, reconnects, or
 # disconnects a MULTI debugger window.  The only mutating operation is an
@@ -6,6 +6,7 @@
 # confirmation while the target stays stopped.
 
 import os
+import binascii
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
@@ -44,7 +45,7 @@ def explicitly_supplied_router_port():
 def fresh_token():
     for unused in range(16):
         try:
-            value = int(os.urandom(4).encode("hex"), 16)
+            value = int(binascii.hexlify(os.urandom(4)), 16)
         except Exception:
             raise RuntimeError("could not create a unique probe breakpoint token")
         if value:

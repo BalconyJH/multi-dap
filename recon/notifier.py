@@ -1,4 +1,4 @@
-"""Best-effort loopback breakpoint hint notifier for MULTI-Python 2.7."""
+"""Best-effort loopback breakpoint hint notifier for MULTI-Python 3/2."""
 
 from __future__ import absolute_import
 

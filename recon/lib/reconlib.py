@@ -1,4 +1,4 @@
-# Python 2.7 - runs inside the MULTI embedded interpreter under mpythonrun.
+# Python 3/2 compatible - runs inside the selected MULTI embedded interpreter under mpythonrun.
 # Support library for M0 reconnaissance probes.
 #
 # Contract: a probe constructs one Recorder, drives it, and calls finish().

@@ -1,4 +1,4 @@
-# Python 2.7. Minimal, operator-gated execution-domain experiment.
+# Python 3/2. Minimal, operator-gated execution-domain experiment.
 #
 # The disabled phase establishes a read-only frozen program topology.  Armed
 # phase one routes `halt` to an already stopped selected component.  The
@@ -18,6 +18,11 @@ try:
     long
 except NameError:
     long = int
+
+try:
+    _STRING_TYPES = (basestring,)
+except NameError:
+    _STRING_TYPES = (str,)
 
 
 HALT_ACKNOWLEDGEMENT = "I_UNDERSTAND_ROUTED_HALT_ON_STOPPED_TARGET"
@@ -105,7 +110,7 @@ def routed_read(session, topology, core, command):
     result = reconlib.run_command(session, "route %s %s" % (
         topology.component_by_core[core], command))
     if (not result.get("accepted") or result.get("status") != 1 or
-            not isinstance(result.get("raw"), basestring)):
+            not isinstance(result.get("raw"), _STRING_TYPES)):
         raise RuntimeError("routed observable command was rejected")
     return result["raw"]
 
