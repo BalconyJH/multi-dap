@@ -195,6 +195,38 @@ func TestTopologyRoutedRevalidatesThenRunsCommand(t *testing.T) {
 	}
 }
 
+func TestResolveTopologyRejectsPIDAndCoreAliasesWithoutProgram(t *testing.T) {
+	driver, caller := newTestDriver(t,
+		fakeCall{method: "cores", params: map[string]string{}, result: commandText("components", golden(t, "components_multi_alias.txt"))},
+	)
+	_, err := ResolveTopology(context.Background(), driver, []CoreSpec{{ID: 0, ELF: `X:\host.elf`}, {ID: 1, ELF: `X:\hsm.elf`}})
+	if err == nil || !strings.Contains(err.Error(), "no program components") {
+		t.Fatalf("ResolveTopology() error = %v, want no program components", err)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("unconsumed calls: %#v", caller.calls)
+	}
+}
+
+func TestResolveTopologyProgramWithPIDStillRevalidatesELF(t *testing.T) {
+	components := componentInventory("component.3 (debugger.core.0, debugger.pid.1, debugger.name.alias)")
+	driver, caller := newTestDriver(t,
+		fakeCall{method: "cores", params: map[string]string{}, result: commandText("components", components)},
+		fakeCall{method: "run_commands", params: command("route component.3 P"), result: commandText("raw", processTable(0, 1, StatusStopped, `X:\one.elf`))},
+		fakeCall{method: "run_commands", params: command("route component.3 P"), result: commandText("raw", processTable(0, 1, StatusStopped, `X:\other.elf`))},
+	)
+	topology, err := ResolveTopology(context.Background(), driver, []CoreSpec{{ID: 42, ELF: `X:\one.elf`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := topology.routed(context.Background(), driver, 42, "calls"); err == nil || !strings.Contains(err.Error(), "drifted") {
+		t.Fatalf("Topology.routed() error = %v, want drift failure", err)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("unconsumed calls: %#v", caller.calls)
+	}
+}
+
 func componentInventory(rows ...string) string {
 	if len(rows) == 0 {
 		return "The currently registered components are:\n"

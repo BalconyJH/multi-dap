@@ -1,0 +1,6 @@
+The currently registered components are:
+ component_manager.0
+ component.1
+ component.2 (debugserver.name.850eserv2)
+ component.3 (debugger.pid.1, debugger.core.0, debugger.core.850eserv2.0)
+ component.4 (debugger.pid.2, debugger.core.1, debugger.core.850eserv2.1)

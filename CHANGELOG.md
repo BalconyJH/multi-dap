@@ -6,6 +6,12 @@ version is tagged.
 
 ## Unreleased
 
+### Fixed
+
+- MULTI component inventories accept comma-separated PID/core aliases without
+  treating them as program bindings. Exact routed ELF identity checks remain
+  mandatory, and ambiguous aliases fail closed.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added
