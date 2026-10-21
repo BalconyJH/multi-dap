@@ -1,5 +1,6 @@
 {
-  "multi_root": "C:/path/to/multi_716d",
+  "multi_root": "C:/path/to/multi_814",
+  "python_version": 3,
   "service_router_port": 0,
   "connection_args": "<target-server> -df=\"C:/path/to/device.dvf\" <target-flags>",
   "multicore_project": "C:/path/to/project.ghsmc",
