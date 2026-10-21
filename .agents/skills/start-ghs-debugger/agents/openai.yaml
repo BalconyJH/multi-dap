@@ -1,0 +1,4 @@
+interface:
+  display_name: "Start GHS Debugger"
+  short_description: "Launch and automate Green Hills MULTI over its command socket"
+  default_prompt: "Use $start-ghs-debugger to inspect the MULTI command socket session while preserving the target. Require explicit authorization for each download, erase, program, reset, or run operation; reset permission does not authorize flash changes or execution. Keep raw evidence private and share sanitized summaries."
