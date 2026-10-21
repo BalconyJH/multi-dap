@@ -19,10 +19,18 @@ type warmRouterFinder func(context.Context, string) ([]bridge.ServiceRouter, err
 
 var findWarmRouters warmRouterFinder = discoverWarmRouters
 
+// startWarmBridge is replaceable in package tests so router verification can
+// assert the complete launch contract without creating a real mpythonrun
+// process. Production uses the same bridge starter as normal runtime startup.
+var startWarmBridge = func(ctx context.Context, spec bridge.LaunchSpec) (bridgeProcess, error) {
+	return bridge.Start(ctx, spec)
+}
+
 var verifyWarmRouter = func(ctx context.Context, cfg config.Validated, script string, warm WarmSession) error {
-	process, err := bridge.Start(ctx, bridge.LaunchSpec{
+	process, err := startWarmBridge(ctx, bridge.LaunchSpec{
 		Executable: cfg.Multi.Executable, BridgeScript: script,
-		RPCPort: cfg.Endpoints.MBP.Port, RPCHost: cfg.Endpoints.MBP.Host,
+		PythonVersion: cfg.Multi.PythonVersion,
+		RPCPort:       cfg.Endpoints.MBP.Port, RPCHost: cfg.Endpoints.MBP.Host,
 		ServiceRouter: &bridge.ServiceRouter{Host: warm.ServiceRouterHost, Port: warm.ServiceRouterPort},
 		SessionMode:   bridge.SessionModeWarm,
 	})

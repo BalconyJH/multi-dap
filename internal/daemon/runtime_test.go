@@ -205,7 +205,7 @@ func runtimeBridgeResult(request mbp.Request) (json.RawMessage, bool) {
 
 func testRuntimeConfig() config.Validated {
 	return config.Validated{
-		Multi:      config.ValidatedMulti{Executable: "fake-mpythonrun.exe"},
+		Multi:      config.ValidatedMulti{Executable: "fake-mpythonrun.exe", PythonVersion: config.PythonVersion3},
 		Connection: config.ValidatedConnection{Project: "project.gpj", Arguments: "-target fake"},
 		Probe:      config.ProbeIdentity{ID: "daemon-runtime-test"},
 		Endpoints: config.ValidatedEndpoints{
@@ -231,7 +231,7 @@ func testBridgeScript(t *testing.T) string {
 func startRuntimeFake(t *testing.T, fake *runtimeFakeBridge, cfg config.Validated) *Runtime {
 	t.Helper()
 	runtime, err := startWith(context.Background(), Options{Config: cfg, BridgeScript: testBridgeScript(t)}, func(_ context.Context, spec bridge.LaunchSpec) (bridgeProcess, error) {
-		if spec.Executable != cfg.Multi.Executable || spec.RPCHost != cfg.Endpoints.MBP.Host || spec.RPCPort != cfg.Endpoints.MBP.Port || spec.SessionMode != bridge.SessionModeCold || spec.ServiceRouter != nil {
+		if spec.Executable != cfg.Multi.Executable || spec.PythonVersion != cfg.Multi.PythonVersion || spec.RPCHost != cfg.Endpoints.MBP.Host || spec.RPCPort != cfg.Endpoints.MBP.Port || spec.SessionMode != bridge.SessionModeCold || spec.ServiceRouter != nil {
 			t.Fatalf("bridge spec = %#v", spec)
 		}
 		return fake, nil
@@ -247,6 +247,7 @@ func TestRuntimeWarmSessionUsesOneAtomicLaunchAndOpenIdentity(t *testing.T) {
 	fake := newRuntimeFakeBridge(t)
 	cfg := testRuntimeConfig()
 	cfg.Probe.ID = "daemon-runtime-warm"
+	cfg.Multi.PythonVersion = config.PythonVersion2
 	primaryELF := filepath.Join(t.TempDir(), "primary.elf")
 	if err := os.WriteFile(primaryELF, []byte("not-dwarf"), 0o600); err != nil {
 		t.Fatal(err)
@@ -267,7 +268,7 @@ func TestRuntimeWarmSessionUsesOneAtomicLaunchAndOpenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(runtime.Close)
-	if launched.SessionMode != bridge.SessionModeWarm || launched.ServiceRouter == nil || launched.ServiceRouter.Host != "127.0.0.1" || launched.ServiceRouter.Port != 40123 {
+	if launched.PythonVersion != config.PythonVersion2 || launched.SessionMode != bridge.SessionModeWarm || launched.ServiceRouter == nil || launched.ServiceRouter.Host != "127.0.0.1" || launched.ServiceRouter.Port != 40123 {
 		t.Fatalf("warm launch = %#v", launched)
 	}
 	params, ok := fake.requestParams("open")
