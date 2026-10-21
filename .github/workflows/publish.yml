@@ -125,9 +125,11 @@ jobs:
             exit 1
           fi
           source_date_epoch="$(git show -s --format=%ct "$release_commit")"
-          printf 'RELEASE_COMMIT=%s\n' "$release_commit" >> "$GITHUB_ENV"
-          printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch" >> "$GITHUB_ENV"
-          printf 'RELEASE_LICENSE=%s\n' "$release_license" >> "$GITHUB_ENV"
+          {
+            printf 'RELEASE_COMMIT=%s\n' "$release_commit"
+            printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch"
+            printf 'RELEASE_LICENSE=%s\n' "$release_license"
+          } >> "$GITHUB_ENV"
       - name: Inspect and download draft assets
         shell: bash
         env:
