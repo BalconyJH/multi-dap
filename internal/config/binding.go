@@ -4,9 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 )
 
-const bindingSchema = "multi-dap.config-binding/v2"
+const bindingSchema = "multi-dap.config-binding/v3"
 
 // BindingDigest returns an opaque, stable identity for a validated project
 // configuration. It intentionally represents runtime semantics rather than
@@ -27,6 +28,7 @@ func BindingDigest(validated Validated) (string, error) {
 		Multi: bindingMulti{
 			Installation:  validated.Multi.Installation,
 			Executable:    validated.Multi.Executable,
+			Version:       normalizedBindingMultiVersion(validated.Multi.Version),
 			PythonVersion: pythonVersion,
 		},
 		Connection: bindingConnection{
@@ -89,7 +91,22 @@ type bindingEnvelope struct {
 type bindingMulti struct {
 	Installation  string `json:"installation"`
 	Executable    string `json:"executable"`
+	Version       string `json:"version"`
 	PythonVersion int    `json:"python_version"`
+}
+
+func normalizedBindingMultiVersion(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" || strings.EqualFold(value, MultiVersionAuto) {
+		return ""
+	}
+	if normalized, err := NormalizeMultiVersion(value); err == nil {
+		return normalized
+	}
+	// BindingDigest is also used by a few direct callers that construct a
+	// Validated value without running Validate. Preserve their input rather
+	// than silently collapsing two distinct identities.
+	return value
 }
 
 type bindingConnection struct {
