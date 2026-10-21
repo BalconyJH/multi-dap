@@ -33,8 +33,8 @@ type Component struct {
 	Name      string
 }
 
-// ParseComponents parses components command output captured from MULTI 7.1.6d.
-// The undocumented text format is pinned by testdata/components.txt.
+// ParseComponents parses components command output captured from MULTI 7.1.6d
+// and 8.1.4. The undocumented text formats are pinned by testdata/components*.txt.
 func ParseComponents(output string) ([]Component, error) {
 	var components []Component
 	seenIDs := make(map[ComponentID]struct{})
@@ -52,21 +52,8 @@ func ParseComponents(output string) ([]Component, error) {
 			return nil, fmt.Errorf("parse components: duplicate component ID")
 		}
 		seenIDs[component.ID] = struct{}{}
-		descriptor := match[2]
-		switch {
-		case strings.HasPrefix(descriptor, "debugger.pid."):
-			processID, ok := parseUint(strings.TrimPrefix(descriptor, "debugger.pid."))
-			if !ok || processID == 0 {
-				return nil, fmt.Errorf("parse components: invalid process alias")
-			}
-			component.Role = ComponentPIDAlias
-			component.ProcessID = processID
-		case strings.HasPrefix(descriptor, "debugger.name."):
-			component.Role = ComponentProgram
-			component.Name = strings.TrimPrefix(descriptor, "debugger.name.")
-		case strings.HasPrefix(descriptor, "debugserver.name."):
-			component.Role = ComponentDebugServer
-			component.Name = strings.TrimPrefix(descriptor, "debugserver.name.")
+		if err := parseComponentAliases(&component, match[2]); err != nil {
+			return nil, err
 		}
 		components = append(components, component)
 	}
@@ -74,4 +61,55 @@ func ParseComponents(output string) ([]Component, error) {
 		return nil, fmt.Errorf("parse components: no rows")
 	}
 	return components, nil
+}
+
+func parseComponentAliases(component *Component, descriptor string) error {
+	if descriptor == "" {
+		return nil
+	}
+	aliases := strings.Split(descriptor, ",")
+	for index, rawAlias := range aliases {
+		alias := strings.TrimSpace(rawAlias)
+		switch {
+		case alias == "":
+			return fmt.Errorf("parse components: empty alias")
+		case strings.HasPrefix(alias, "debugger.pid."):
+			processID, ok := parseUint(strings.TrimPrefix(alias, "debugger.pid."))
+			if !ok || processID == 0 {
+				return fmt.Errorf("parse components: invalid process alias")
+			}
+			if component.ProcessID != 0 {
+				return fmt.Errorf("parse components: duplicate process alias")
+			}
+			component.Role = ComponentPIDAlias
+			component.ProcessID = processID
+		case strings.HasPrefix(alias, "debugger.name."), strings.HasPrefix(alias, "debugserver.name."):
+			// Preserve literal commas in names; only known alias prefixes are ambiguous.
+			for _, remainder := range aliases[index+1:] {
+				remainder = strings.TrimSpace(remainder)
+				if strings.HasPrefix(remainder, "debugger.pid.") ||
+					strings.HasPrefix(remainder, "debugger.core.") ||
+					strings.HasPrefix(remainder, "debugger.name.") ||
+					strings.HasPrefix(remainder, "debugserver.name.") {
+					return fmt.Errorf("parse components: ambiguous name alias")
+				}
+			}
+			name := strings.TrimSpace(strings.Join(aliases[index:], ","))
+			if strings.HasPrefix(alias, "debugger.name.") {
+				component.Role = ComponentProgram
+				component.Name = strings.TrimPrefix(name, "debugger.name.")
+			} else {
+				if component.ProcessID != 0 {
+					return fmt.Errorf("parse components: conflicting component roles")
+				}
+				component.Role = ComponentDebugServer
+				component.Name = strings.TrimPrefix(name, "debugserver.name.")
+			}
+			if strings.TrimSpace(component.Name) == "" {
+				return fmt.Errorf("parse components: empty name alias")
+			}
+			return nil
+		}
+	}
+	return nil
 }

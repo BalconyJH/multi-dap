@@ -605,6 +605,12 @@ and never maintains a hand-written source-to-core map.
 
 ### 6.7 Thread model: freeze group
 
+Component inventories may contain comma-separated PID and core aliases.
+These aliases are metadata, not program or configured-core identity. Routing
+still requires an exact full-path ELF match from the component's routed `P`
+output and revalidates that identity before use. PID/core-only inventories,
+ambiguous aliases, and identity drift fail closed.
+
 Cores map to DAP threads:
 
 ```

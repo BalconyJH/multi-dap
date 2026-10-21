@@ -21,6 +21,7 @@ experiments live in [M0 findings](m0-findings.md).
 |---|---|---|
 | Strict TOML configuration | `IMPLEMENTED` | Absolute paths, unique core identities, numeric loopback endpoints, lifecycle policy, and optional inspection core are validated before startup. |
 | MBP v1 bridge transport | `IMPLEMENTED` | Bounded NDJSON over loopback TCP; the bridge contains mechanism, while policy remains in Go. |
+| MULTI component routing | `IMPLEMENTED` | Comma-separated PID/core aliases are parsed as metadata, never as program identity. Exact routed ELF binding is required; missing programs, ambiguous aliases, and identity drift fail closed. |
 | Cold acquisition | `HARDWARE_OBSERVED` | Explicit `DebugProgram` and `ConnectToTarget`; optional already-present preparation does not download, flash, reset, or verify memory. |
 | Warm acquisition | `HARDWARE_OBSERVED` | Requires the runtime router address and an exact, unique, stable full-path program binding; no cold fallback. |
 | Session Actor and epochs | `IMPLEMENTED` | One actor serializes state; bridge I/O uses one executor; stale bridge/frontend generations and stale stop-scoped handles are rejected. |
