@@ -7,6 +7,14 @@ configuration, and CLion 2026.2.1 framing regressions. Host transport evidence
 and a limited native CLion hardware smoke test are recorded separately below;
 neither constitutes full execution, breakpoint-hit, or release qualification.
 
+The current Windows compatibility profile is MULTI IDE 8.1.4 with Compiler
+2024.1.4 / Probe 6.6.8. The bridge selects MULTI's embedded Python 3 by
+default. The configuration can identify the MULTI release automatically or
+constrain it with `multi.version`; `multi.python_version = 2` is an explicit
+legacy fallback. The profile's Python 3/2 interpreter checks and no-target bridge
+smoke are recorded in [verification evidence](verification-evidence.md); they do
+not qualify a target or the newer compiler/probe combination.
+
 ## Reproducible Windows package
 
 Run from the repository root:
@@ -40,11 +48,24 @@ pwsh -NoProfile -File .\scripts\Invoke-WindowsReleaseAcceptance.ps1 -Version 0.1
 
 Full mode runs `go test ./...`, `go vet ./...`, and `go test -race ./...` under `GOPROXY=off` and `-mod=readonly`, so it uses only the existing Go module cache, downloads no dependencies, and does not rewrite `go.mod` or `go.sum`. It then runs bridge and recon Python 3 host tests using `uv run --offline --no-python-downloads --no-project --python 3.12`. These tests use a fake MULTI API, do not start a GUI, do not connect hardware, and do not automatically download Python.
 
-If passed `-MultiPython <path-to-python.exe>`, or if `MULTI_PYTHON` is set (also inferred from `MULTI_INSTALLATION` / `GHS_MULTI_ROOT`), the script confirms it is Python 2, then compiles the bridge, recon library, runner, notifier, and probes into a temporary directory it creates. Without configured MULTI Python 2, this step is explicitly `skipped` and is never counted as passing. Compilation runs no probe and writes no `.pyc` into the working tree.
+For the embedded-runtime compilation step, the script prefers a standalone
+Python 3 interpreter. Pass `-MultiPython3 <path-to-python.exe>` to select one
+explicitly; `-MultiPython2 <path-to-python.exe>` selects the legacy fallback,
+and the retained `-MultiPython <path-to-python.exe>` option is its Python 2
+compatibility alias. With no explicit path, candidates inferred from
+`MULTI_INSTALLATION` / `GHS_MULTI_ROOT` are checked in Python 3 then Python 2
+order (the `MULTI_PYTHON3` / `MULTI_PYTHON2` environment variables are also
+accepted; the historical generic `MULTI_PYTHON` value is classified by its
+reported major version). The script
+verifies the interpreter's major version and compiles the
+bridge, recon library, runner, notifier, and probes into a temporary directory.
+This check does not execute a probe or open a target. If no usable standalone
+interpreter is configured, the step is explicitly `skipped` and is never
+counted as passing; compilation writes no `.pyc` into the working tree.
 
 Finally, full mode runs `Test-WindowsPackage.ps1`: it independently builds two ZIP files, requires matching archive hashes, verifies each archive's entry allowlist and rejection of runtime artifacts such as configuration/token/capture/log/ready files, and validates in both directions that the manifest has a complete, unique, ordered payload set and SHA-256 for every payload. This is a PowerShell self-test independent of Pester.
 
-Each step emits `PASS`, `FAIL`, or `SKIP` with its duration. The final line is CI-readable `RELEASE_ACCEPTANCE_RESULT` JSON; the process exits with `1` when any required step fails. During development, `-Mode Fast` runs ordinary Go test, vet, and both Python host-test suites. It explicitly skips race tests, MULTI Python 2 compilation, and dual-build package verification, and cannot be used for release.
+Each step emits `PASS`, `FAIL`, or `SKIP` with its duration. The final line is CI-readable `RELEASE_ACCEPTANCE_RESULT` JSON; the process exits with `1` when any required step fails. During development, `-Mode Fast` runs ordinary Go test, vet, and both Python host-test suites. It explicitly skips race tests, MULTI embedded-runtime compilation, and dual-build package verification, and cannot be used for release.
 
 The package contains only:
 

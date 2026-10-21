@@ -3,8 +3,10 @@
 **Status:** The architecture contract and current delivery status are maintained separately.
 Hardware evidence and its uncovered items are documented in
 [m0-findings.md](m0-findings.md).
-**Date:** 2026-08-18
-**Target:** Green Hills MULTI 7.1.6d (local installation and a five-core hardware session)
+**Date:** 2026-09-13
+**Target:** Green Hills MULTI IDE 8.1.4 with Compiler 2024.1.4 / Probe 6.6.8
+**Hardware evidence baseline:** Green Hills MULTI 7.1.6d (historical local
+installation and a five-core hardware session)
 **DAP target:** 1.71.0 — the baseline for any future behavioral dispute
 
 This document records the architecture contract and observed facts; design candidates, host
@@ -13,6 +15,18 @@ delivery boundary is in §12: M2 and M3 top-level inspection are integrated; M4 
 is integrated only for the single-configured-core path, and multi-core `ExecutionDomain` has no
 production executor. Every unverified operation fails closed. M0-2, M0-6, and M0-7 remain
 unfinished hardware measurements.
+
+The current compatibility profile contains MULTI's embedded Python 3.8.6 and
+Python 2.7.3 runtimes. Python 3 is selected by default; set
+`multi.python_version = 2` only as an explicit legacy fallback. The launcher
+pins `GHS_IDE_USE_PYTHON3` to the configured choice, and the choice is part of
+the configuration binding. Read-only checks on the 8.1.4 installation loaded
+both interpreters and imported the required debugger modules; a Python 3
+bridge smoke completed an MBP handshake without a target. Those checks prove
+interpreter/bridge compatibility only. They do not replace the historical M0
+hardware evidence below or qualify C++20, RH850/U2B24, breakpoints, execution,
+or any other target operation on the newer toolchain. See
+[verification-evidence.md](verification-evidence.md) for the sanitized record.
 
 ## 1. Purpose
 
@@ -34,7 +48,46 @@ repository.
 - Simulating per-core execution control on a synchronous freeze group (§6.7).
 - Remote debugging. All listeners are loopback-only by design (§7.6).
 
-## 3. Verified facts about MULTI 7.1.6d
+## 3. Compatibility facts and evidence
+
+### Current MULTI 8.1.4 profile
+
+The current profile is MULTI IDE 8.1.4, paired with Compiler 2024.1.4 / Probe
+6.6.8. The compiler/probe directory is a separate toolchain
+input; `multi.installation` must point to the MULTI IDE directory, where
+`mpythonrun.exe` is installed.
+
+Configuration loading identifies the selected MULTI release from the
+installation's release metadata without executing installation code. A project
+may leave `multi.version` omitted (automatic detection) or set an exact release
+constraint such as `"8.1.4"`; `"auto"` requires successful detection. The
+standalone `multi-version --installation` command reads metadata by default and
+may run the installation's `gversion` utility only with the explicit
+`--allow-executable-probe` opt-in when textual metadata is unavailable. The
+observed release is included in the semantic configuration binding. Neither
+path starts `multi.exe` or connects to a target.
+
+MULTI 8.1.4 provides embedded Python 3.8.6 and Python 2.7.3. The supported
+default is Python 3. Configure `multi.python_version = 2` only when an older
+installation or an explicitly retained legacy bridge requires Python 2. The
+launcher sets `GHS_IDE_USE_PYTHON3` to match this choice and does not silently
+retry under the other interpreter after a failed start.
+
+The current evidence is intentionally narrow:
+
+| Check | Result | Boundary |
+|---|---|---|
+| Read-only `p00_env` with Python 3 selected | Python 3.8.6 loaded and `ghs_debugger` / `ghs_debugger_api` imported | No target contact |
+| Read-only `p00_env` with Python 2 selected | Python 2.7.3 loaded and the required debugger modules imported | No target contact |
+| `bridge.py` under Python 3, loopback MBP handshake and `state` request | Handshake passed; expected `session_not_open` response returned | No target contact |
+
+These checks establish interpreter and bridge-process compatibility for the
+profile. They do not qualify C++20, RH850/U2B24, breakpoints, execution,
+inspection, or any other target operation on the newer toolchain. The hardware
+facts that follow belong to the historical M0 session and must not be
+transferred to 8.1.4 without a new measurement.
+
+### Historical verified facts about MULTI 7.1.6d
 
 These were confirmed against the local installation and its shipped manuals
 (`manuals/script.pdf`, `manuals/debug_cmd.pdf`). They are load-bearing: if any turns out to
@@ -53,7 +106,8 @@ be wrong on hardware, the affected section must be revisited.
 | The Py pane / Py Window share one Python context per Debugger window; the standalone Python GUI has a separate context | `script.pdf`, "Interface Comparison" |
 | `$restart` restarts the underlying interpreter and discards the old context | `script.pdf`, Py pane commands |
 
-Verified on hardware in M0 (details and evidence in [m0-findings.md](m0-findings.md)):
+Verified on the historical 7.1.6d hardware session in M0 (details and evidence
+in [m0-findings.md](m0-findings.md)):
 
 | Fact | Where it matters |
 |---|---|
@@ -112,12 +166,12 @@ subscribed to.
                         │
               MBP v1 — NDJSON over loopback TCP
                         ▼
-              ┌───────────────────┐
-              │ bridge.py (Py2.7) │
-              │  mechanism only   │
-              └─────────┬─────────┘
+              ┌─────────────────────────┐
+              │  bridge.py (Py3 default)│
+              │     mechanism only      │
+              └───────────┬─────────────┘
                         │
-                  MULTI-Python
+             MULTI-Python (selected)
                         ▼
                      MULTI
                         │
@@ -126,8 +180,11 @@ subscribed to.
                      target
 ```
 
-Written in Go, except `bridge.py` and the notifier snippet, which must be Python 2.7
-because that is what MULTI embeds.
+Written in Go, except `bridge.py` and the optional notifier snippet. The bridge
+source is compatible with MULTI 8's embedded Python 3.8 and the Python 2.7
+fallback; the launcher selects Python 3 unless the project explicitly requests
+Python 2. The historical M0 probes were authored for Python 2.7, so their
+observed results retain that version label.
 
 ### Frontends are presentation only
 
@@ -151,8 +208,8 @@ Debugger Core owns every piece of identity and state: handle allocation and inva
 breakpoint identity mapping, stop arbitration, event deduplication, core-to-thread mapping,
 source path rewriting, polling cadence and backoff, retry and deadline policy.
 
-The language split is the first line of defense — leaking policy into the bridge means
-writing it in Python 2.7. CI enforces the rest:
+The language split is the first line of defense — leaking policy into the bridge
+would move semantics out of Go and make them runtime-dependent. CI enforces the rest:
 
 - `bridge.py` must not contain DAP terminology (`dap`, `thread`, `variablesReference`,
   `frameId`, `stackFrame`, `scopes`)
@@ -827,14 +884,15 @@ road and the "giant Python script" anti-pattern reappears in a different shape.
 - every call site carries an annotation stating why no structured method exists, e.g.
 
 ```go
-// MULTI-NOSTRUCT: MULTI 7.1.6d exposes no structured API for X.
+// MULTI-NOSTRUCT: the selected MULTI API exposes no structured API for X.
 // Output contract pinned by golden fixture testdata/x_output.txt.
 ```
 
 ### 7.5 Encoding
 
-Fixed now rather than discovered later, because Python 2.7's `str`/`unicode` split will
-otherwise surface as corrupted output at the worst moment:
+The wire encoding must work under both supported embedded runtimes. Python 2.7's
+`str`/`unicode` split is the sharpest edge, so it is handled explicitly rather
+than discovered later:
 
 - the wire is UTF-8 bytes
 - every outbound string in the bridge is converted to `unicode` before encoding
@@ -1107,7 +1165,7 @@ is in [m0-findings.md](m0-findings.md).**
 | # | Question | Status | What it changed |
 |---|---|---|---|
 | 1 | Can `mpythonrun` attach to an existing MULTI session, or only create its own? | **Answered for acquisition.** Same-router, exact-full-path warm binding has passed; repeating cold connect remains unsafe | automatic recovery remains fail-closed because a blocked window command has no supported cancel/timeout |
-| 2 | Can a Python 2.7 script inside `mpythonrun` run a resident socket loop while MULTI-Python calls are made? | **Open.** `socket` and `threading` import cleanly; probe written | §7.1 stands provisionally |
+| 2 | Can a selected MULTI-Python script inside `mpythonrun` run a resident socket loop while MULTI-Python calls are made? | **Open.** The historical Python 2.7 `socket`/`threading` probe was written; the Python 3 default path still needs an equivalent hardware measurement | §7.1 stands provisionally |
 | 3 | `python` is GUI only — can the MULTI window be hidden or minimized in daemon mode? | **Substantially answered.** The whole capture ran minimized with no loss of function; `goaway` / `comeback` are documented for exactly this | daemon presentation |
 | 4 | **Finalize the inspection contract.** | **Answered.** No structured API; command text only, but one-level expansion and array indexing both work | §7.3 frozen; expression path is the value locator |
 | 5 | Breakpoint Python execution context | **Half answered.** Command lists can be set, listed, and fired, and are reported back by `H`; Python in a command list is untested | The current identity is a strict `mprintf` token plus `H` parsing; UDP/notifier remains an optional seam |

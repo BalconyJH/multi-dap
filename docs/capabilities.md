@@ -20,6 +20,7 @@ experiments live in [M0 findings](m0-findings.md).
 | Surface | Status | Current boundary |
 |---|---|---|
 | Strict TOML configuration | `IMPLEMENTED` | Absolute paths, unique core identities, numeric loopback endpoints, lifecycle policy, and optional inspection core are validated before startup. |
+| MULTI version/runtime selection | `IMPLEMENTED` | Configuration loading identifies the selected installation from release metadata; the `multi-version` command can additionally use `gversion.exe` only with an explicit executable-probe opt-in. The result can be constrained with `multi.version` and is configuration-bound. Embedded Python 3 remains the default; `python_version = 2` is an explicit legacy fallback. |
 | MBP v1 bridge transport | `IMPLEMENTED` | Bounded NDJSON over loopback TCP; the bridge contains mechanism, while policy remains in Go. |
 | MULTI component routing | `IMPLEMENTED` | Comma-separated PID/core aliases are parsed as metadata, never as program identity. Exact routed ELF binding is required; missing programs, ambiguous aliases, and identity drift fail closed. |
 | Cold acquisition | `HARDWARE_OBSERVED` | Explicit `DebugProgram` and `ConnectToTarget`; optional already-present preparation does not download, flash, reset, or verify memory. |
@@ -57,17 +58,24 @@ The repository currently has automated host coverage for:
 - Go unit, integration, race, and build checks;
 - pinned workflow linting, action-reference policy, changelog policy, and a
   live Go vulnerability-database scan in CI/release automation;
-- Python 3 host tests for the Python 2.7-compatible bridge and reconnaissance
-  harness, using fake MULTI APIs;
+- Python 3 host tests for the dual-runtime bridge and reconnaissance harness,
+  using fake MULTI APIs;
 - VS Code extension tests and package-content checks;
 - deterministic Windows archive construction, exact payload allowlisting,
-  embedded hashes, and reproducibility.
+  embedded hashes, and reproducibility;
 - semantic configuration-digest coverage, same-ID mismatch rejection, and the
   parent/child `ensure` change-between-read fence.
 
-The full acceptance script treats MULTI Python 2 byte-compilation as `SKIP`
-when no interpreter is configured; a release owner must review that result
-rather than reading the overall exit code as hardware or runtime qualification.
+Separate local no-target observations on MULTI 8.1.4 confirmed debugger-module
+imports under embedded Python 3.8.6 and Python 2.7.3. The MBP handshake and bounded
+`state` request were observed under Python 3 only. These are not automated host
+checks or hardware qualification.
+
+The full acceptance script's MULTI embedded-runtime byte-compilation step is
+`SKIP` when no usable standalone Python 3 or Python 2 interpreter is configured;
+Python 3 is searched first, with a Python 2 compatibility fallback. A release
+owner must review that result rather than reading the overall exit code as
+hardware or runtime qualification.
 The sanitized [verification evidence index](verification-evidence.md) records
 the latest local run and distinguishes interpreter compatibility from hardware
 qualification.
@@ -81,8 +89,9 @@ qualification.
   claiming those integrations.
 - Implement and verify a multicore execution domain before enabling multicore
   stepping.
-- Reduce the Python 2.7 bridge review surface by extracting mechanism-only
-  helpers while preserving the contract-tested policy boundary.
+- Keep the legacy Python 2.7 compatibility surface small by extracting
+  mechanism-only helpers while preserving the contract-tested policy boundary;
+  Python 3 remains the default runtime.
 - Complete a reviewed tagged build and hosted public-repository release run.
 
 These items do not invalidate the tested host software, but they constrain what

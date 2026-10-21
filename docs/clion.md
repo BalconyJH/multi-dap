@@ -10,6 +10,8 @@ or a generated `.idea` file.
 | IDE baseline | Validated with CLion 2026.2.1 (build 262.9437.136). |
 | Later observation | A limited CLion 2026.3 hardware run covered attach, stacks, evaluation, Memory View, and Disassembly. |
 | Host | Windows amd64 with a separately licensed Green Hills MULTI installation. |
+| Current MULTI profile | MULTI IDE 8.1.4 with Compiler 2024.1.4 / Probe 6.6.8. |
+| Embedded bridge runtime | Python 3 is selected by default; set `multi.python_version = 2` only for the explicit legacy fallback. |
 | CLion entry point | A CMake Application using the `multi-dap` DAP Debug Profile. |
 | Adapter transport | `multi-dap.exe proxy --config "<absolute-project.toml>"` over `stdin/stdout`. |
 | Session preparation | Explicit `ensure --acquisition cold` or explicit `ensure --acquisition warm`. |
@@ -33,7 +35,7 @@ flowchart LR
     cmake["CLion CMake Debug"] --> profile["Cidr DAP profile"]
     profile -->|"stdio"| proxy["multi-dap proxy"]
     proxy -->|"authenticated local control"| daemon
-    daemon --> bridge["MULTI Python 2.7 bridge"]
+    daemon --> bridge["MULTI Python 3 bridge (default)"]
     bridge --> multi["Green Hills MULTI"]
     multi --> target["probe and target"]
 ```
@@ -83,6 +85,8 @@ The configuration must describe the target, not the CLion project UI:
 |---|---|
 | `multi.installation` | Existing local MULTI installation directory. |
 | `multi.executable` | `mpythonrun.exe` inside that installation. |
+| `multi.version` | Optional exact release constraint such as `"8.1.4"`; omit or use `"auto"` to identify the installed MULTI release. |
+| `multi.python_version` | Optional `3` (default) or explicit legacy fallback `2`; the launcher pins the corresponding embedded runtime. |
 | `connection.project` | Existing MULTI project file loaded for cold acquisition. |
 | `connection.arguments` | Exact private target-server arguments supplied by the operator. |
 | `connection.preparation` | `none` or the explicit `already_present_no_verify` policy. |

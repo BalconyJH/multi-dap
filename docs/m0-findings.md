@@ -2,6 +2,11 @@
 
 **Date:** 2026-08-18
 **MULTI:** 7.1.6d, `mpythonrun.exe`, embedded interpreter Python 2.7.3 32-bit (`svc_python.exe`)
+
+This is the historical hardware baseline. The current compatibility profile is
+MULTI IDE 8.1.4 with Compiler 2024.1.4 / Probe 6.6.8; its recorded Python 3/2
+checks are no-target smoke only and do not extend the findings below.
+
 **Target:** a multicore device connected through a hardware debug probe; some cores have an
 executable, and the project is described by a multicore configuration file. This document does
 not record the target, server, connection parameters, binary paths, addresses, command text, or
