@@ -1,5 +1,11 @@
 # MULTI 7.1.6d API and Command Surface — Mined from Shipped Manuals
 
+This is a historical manual extraction from the 7.1.6d installation. The
+current compatibility profile is MULTI IDE 8.1.4 with Compiler 2024.1.4 / Probe
+6.6.8; see [verification-evidence.md](verification-evidence.md) for its
+separate, no-target interpreter and bridge checks. Nothing in this reference
+alone qualifies the newer installation or a target operation.
+
 Mined for Task 2 of `docs/superpowers/plans/2026-08-18-m0-recon-and-m1-skeleton.md`. This
 file is the command/attribute reference that Tasks 4–10 draw `RunCommands` call forms and
 `GHS_Debugger` method signatures from. It is **not** hardware-verified; it records only what

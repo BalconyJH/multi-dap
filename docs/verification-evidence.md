@@ -1,8 +1,20 @@
 # Verification Evidence Index
 
 This index records sanitized, local verification evidence collected on
-2026-09-08. It is an audit aid, not a claim that a public release, hosted
+2026-09-13. It is an audit aid, not a claim that a public release, hosted
 workflow, or hardware qualification has occurred.
+
+## MULTI 8 compatibility evidence
+
+| Environment | Check | Result |
+|---|---|---|
+| MULTI IDE 8.1.4 + Compiler 2024.1.4 / Probe 6.6.8 | Read-only `p00_env` with `GHS_IDE_USE_PYTHON3=1` | Python 3.8.6 loaded; `ghs_debugger` and `ghs_debugger_api` imported; no target contact. |
+| Same installation | Read-only `p00_env` with `GHS_IDE_USE_PYTHON3=0` | Python 2.7.3 loaded; required debugger modules imported; no target contact. |
+| Same installation | `bridge.py` under Python 3.8.6, loopback MBP handshake and `state` request | Passed; returned the expected `session_not_open` error without opening a target. |
+
+These checks establish interpreter and bridge-process compatibility only. They do
+not qualify C++20, RH850/U2B24, breakpoints, execution, or any other target
+operation on the newer toolchain.
 
 ## Local release-candidate evidence
 
@@ -13,8 +25,8 @@ workflow, or hardware qualification has occurred.
 | Configuration binding | Go unit and race tests for normalized digests, same-ID mismatch rejection, and the `ensure` parent/child fence | Passed. |
 | License policy | Identical root/package MIT text, explicit LF checkout attributes, and policy-bound SHA-256 | Passed with public distribution approved. |
 | Go vulnerability database | `go run -mod=readonly golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...` | Passed: no known reachable vulnerability was reported. |
-| Bridge host tests | Python 3.12 `unittest bridge.test_bridge` | Passed: 37 tests. |
-| Recon host tests | Python 3.12 `unittest discover -s recon/tests` | Passed: 71 tests. |
+| Bridge host tests | Python 3.12 `unittest bridge.test_bridge` | Passed: 38 tests. |
+| Recon host tests | Python 3.12 `unittest discover -s recon/tests` | Passed: 77 tests. |
 | VS Code extension | `npm test`, `npm run lint`, `npm run package-contents` | Passed: 8 tests, lint, and package-content checks. |
 | Documentation | `uv run --project docs --locked --python 3.12 zensical build --clean --strict` | Passed with no issues. |
 | Repository policies | Language and release-changelog validator unit tests and enforcement | Passed: 23 tests and both policies. |
@@ -29,19 +41,21 @@ packaging determinism, and validation wiring only; they do not identify a
 source commit suitable for publication.
 
 ```powershell
-.\scripts\Invoke-WindowsReleaseAcceptance.ps1 -Mode Full -Version 0.1.0 -Commit abcdef0123456789abcdef0123456789abcdef01 -SourceDateEpoch 315532800 -MultiPython '<MULTI-python2.exe>'
+.\scripts\Invoke-WindowsReleaseAcceptance.ps1 -Mode Full -Version 0.1.0 -Commit abcdef0123456789abcdef0123456789abcdef01 -SourceDateEpoch 315532800 -MultiPython3 'C:\path\to\multi_814\python-3.8.6\python.exe'
 ```
 
 ## MULTI interpreter compilation
 
-The full release gate's byte-compilation check was run with the discovered
-MULTI embedded Python 2.7.3 interpreter and passed. It compiled the bridge and
+The recorded full release-gate byte-compilation check was run with the
+discovered MULTI standalone Python 3.8.6 interpreter and passed. The retained
+`-MultiPython` argument in earlier runs is the Python 2 compatibility alias;
+current acceptance searches Python 3 first. It compiled the bridge and
 recon Python sources only; it did not execute a probe, open a target, or create
 bytecode in the worktree. The interpreter location, installation settings, and
 target configuration are deliberately omitted from this public index.
 
-This is a compatibility check, not a hardware claim. Host tests and byte
-compilation do not demonstrate attach, run control, inspection, breakpoint, or
+This is a compatibility check, not a hardware claim. Host tests, interpreter
+smoke checks, and byte compilation do not demonstrate attach, run control, inspection, breakpoint, or
 multicore behavior against a live target.
 
 ## CLion support evidence
