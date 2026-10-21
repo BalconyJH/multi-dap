@@ -17,6 +17,37 @@ func TestLaunchSpecArgs(t *testing.T) {
 	}
 }
 
+func TestLaunchSpecPythonVersionValidationAndDefault(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version int
+		want    int
+		ok      bool
+	}{
+		{name: "omitted defaults to Python 3", version: 0, want: PythonVersion3, ok: true},
+		{name: "Python 2", version: PythonVersion2, want: PythonVersion2, ok: true},
+		{name: "Python 3", version: PythonVersion3, want: PythonVersion3, ok: true},
+		{name: "unsupported", version: 4, ok: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := normalizePythonVersion(test.version)
+			if (err == nil) != test.ok {
+				t.Fatalf("normalizePythonVersion(%d) error = %v, want ok=%v", test.version, err, test.ok)
+			}
+			if test.ok && got != test.want {
+				t.Fatalf("normalizePythonVersion(%d) = %d, want %d", test.version, got, test.want)
+			}
+		})
+	}
+}
+
+func TestLaunchSpecArgsRejectsUnsupportedPythonVersion(t *testing.T) {
+	spec := LaunchSpec{Executable: "mpythonrun.exe", BridgeScript: "bridge.py", RPCPort: 43123, PythonVersion: 1}
+	if _, err := spec.Args(); err == nil {
+		t.Fatal("Args() error = nil, want unsupported Python version error")
+	}
+}
+
 func TestLaunchSpecRPCAddress(t *testing.T) {
 	spec := LaunchSpec{
 		Executable: "mpythonrun.exe", BridgeScript: "bridge.py", RPCPort: 43123,

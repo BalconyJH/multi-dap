@@ -27,14 +27,25 @@ const (
 	SessionModeWarm SessionMode = "warm"
 )
 
+// Supported embedded Python runtimes exposed by MULTI's mpythonrun. Python 3
+// is the preferred default; Python 2 remains available for legacy installs.
+const (
+	PythonVersion2       = 2
+	PythonVersion3       = 3
+	DefaultPythonVersion = PythonVersion3
+)
+
 // LaunchSpec is the platform-independent command contract for mpythonrun.
 // It is intentionally separate from process creation so its argument ordering
 // can be tested without starting MULTI or requiring hardware.
 type LaunchSpec struct {
 	Executable   string
 	BridgeScript string
-	RPCPort      int
-	RPCHost      string
+	// PythonVersion selects mpythonrun's embedded Python runtime. The zero
+	// value defaults to Python 3 for current MULTI installations.
+	PythonVersion int
+	RPCPort       int
+	RPCHost       string
 	// ReadyFile is the private bridge startup rendezvous path. Start replaces
 	// any caller-supplied value with an owned temporary path.
 	ReadyFile     string
@@ -58,6 +69,9 @@ func (s LaunchSpec) Args() ([]string, error) {
 	}
 	if s.RPCPort == 0 && strings.TrimSpace(s.ReadyFile) == "" {
 		return nil, errors.New("bridge: launcher RPC port 0 requires a ready file")
+	}
+	if _, err := normalizePythonVersion(s.PythonVersion); err != nil {
+		return nil, err
 	}
 
 	mode := s.SessionMode
@@ -107,4 +121,16 @@ func (s LaunchSpec) Args() ([]string, error) {
 		args = append(args, "--ready-file", readyFile)
 	}
 	return args, nil
+}
+
+func normalizePythonVersion(raw int) (int, error) {
+	if raw == 0 {
+		return DefaultPythonVersion, nil
+	}
+	switch raw {
+	case PythonVersion2, PythonVersion3:
+		return raw, nil
+	default:
+		return 0, fmt.Errorf("bridge: unsupported Python runtime version %d (want %d or %d)", raw, PythonVersion2, PythonVersion3)
+	}
 }
