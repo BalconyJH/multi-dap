@@ -25,7 +25,24 @@ type Config struct {
 type MultiConfig struct {
 	Installation string `toml:"installation"`
 	Executable   string `toml:"executable"`
+	// PythonVersion selects the embedded Python runtime used by mpythonrun.
+	// The zero value is treated as Python 3, which is the preferred runtime for
+	// current MULTI installations. Set it to PythonVersion2 explicitly when a
+	// legacy MULTI installation still requires Python 2.
+	PythonVersion int `toml:"python_version"`
+
+	// pythonVersionSet is populated by Load so validation can distinguish an
+	// omitted field (the zero-value default) from an explicit invalid zero.
+	// Directly constructed Config values retain the zero-value default.
+	pythonVersionSet bool
 }
+
+// Supported embedded Python runtimes exposed by MULTI's mpythonrun.
+const (
+	PythonVersion2       = 2
+	PythonVersion3       = 3
+	DefaultPythonVersion = PythonVersion3
+)
 
 // ConnectionConfig contains the project loaded by DebugProgram and the opaque
 // dbserver argument string passed to ConnectToTarget. The argument grammar

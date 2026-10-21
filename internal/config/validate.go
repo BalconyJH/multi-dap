@@ -27,8 +27,9 @@ type Validated struct {
 }
 
 type ValidatedMulti struct {
-	Installation string
-	Executable   string
+	Installation  string
+	Executable    string
+	PythonVersion int
 }
 
 type ValidatedConnection struct {
@@ -104,6 +105,7 @@ func (c Config) Validate(baseDir string) (Validated, error) {
 
 	out.Multi.Installation = validateDirectory(&problems, "multi.installation", c.Multi.Installation, base)
 	out.Multi.Executable = validateFile(&problems, "multi.executable", c.Multi.Executable, base)
+	out.Multi.PythonVersion = validatePythonVersion(&problems, c.Multi.PythonVersion, c.Multi.pythonVersionSet)
 	if out.Multi.Installation != "" && out.Multi.Executable != "" && !within(out.Multi.Installation, out.Multi.Executable) {
 		problems = append(problems, Problem{"multi.executable", errors.New("must be inside multi.installation")})
 	}
@@ -190,6 +192,27 @@ func (c Config) Validate(baseDir string) (Validated, error) {
 		return Validated{}, problems
 	}
 	return out, nil
+}
+
+func validatePythonVersion(problems *Problems, raw int, explicit bool) int {
+	// An omitted TOML integer decodes to zero. Prefer the Python 3 runtime for
+	// current MULTI installations; legacy users can opt into Python 2.
+	if raw == 0 {
+		// Load marks an explicitly supplied zero so it cannot silently turn into
+		// the preferred runtime. Directly constructed Config values leave this
+		// marker false and retain the documented zero-value default.
+		if explicit {
+			*problems = append(*problems, Problem{"multi.python_version", fmt.Errorf("must be %d or %d", PythonVersion2, PythonVersion3)})
+		}
+		return DefaultPythonVersion
+	}
+	switch raw {
+	case PythonVersion2, PythonVersion3:
+		return raw
+	default:
+		*problems = append(*problems, Problem{"multi.python_version", fmt.Errorf("must be %d or %d", PythonVersion2, PythonVersion3)})
+		return DefaultPythonVersion
+	}
 }
 
 // canonicalWindowsPathIdentity matches the target's case-insensitive path

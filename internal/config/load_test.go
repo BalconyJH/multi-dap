@@ -114,6 +114,20 @@ func TestLoadNormalizesConnectionPreparation(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsExplicitZeroPythonVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(content), `executable = "multi/multi.exe"`, "executable = \"multi/multi.exe\"\npython_version = 0", 1)
+	writeConfig(t, path, updated)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.python_version") {
+		t.Fatalf("Load() error = %v, want explicit python version validation error", err)
+	}
+}
+
 func writeValidConfig(t *testing.T, dir string) string {
 	t.Helper()
 	for _, path := range []string{
