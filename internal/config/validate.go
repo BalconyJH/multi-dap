@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -27,8 +28,13 @@ type Validated struct {
 }
 
 type ValidatedMulti struct {
-	Installation  string
-	Executable    string
+	Installation string
+	Executable   string
+	// Version is the normalized, observed MULTI IDE release when evidence is
+	// available. It remains empty for a legacy installation with no release
+	// marker; VersionSource is likewise empty in that validated model.
+	Version       string
+	VersionSource string
 	PythonVersion int
 }
 
@@ -91,10 +97,54 @@ func (p Problems) Error() string {
 	return strings.Join(parts, "; ")
 }
 
-// Validate normalizes c relative to baseDir and verifies all startup-time
-// invariants. It performs no parsing of configuration files and no I/O beyond
-// checking the configured files and directories exist.
+// Validate normalizes c relative to baseDir, verifies structural startup-time
+// invariants, and resolves any available MULTI release metadata. It never
+// executes a program from the installation; callers that explicitly trust the
+// installation's gversion utility can use LoadWithExecutableProbe for parsed
+// TOML input.
 func (c Config) Validate(baseDir string) (Validated, error) {
+	return c.validateWithOptions(context.Background(), baseDir, false)
+}
+
+func (c Config) validateWithOptions(ctx context.Context, baseDir string, allowExecutableProbe bool) (Validated, error) {
+	out, err := c.validateStructure(baseDir)
+	if err != nil {
+		return Validated{}, err
+	}
+	requested := strings.TrimSpace(c.Multi.Version)
+	resolved, probeErr := ResolveMultiVersionWithOptions(ctx, ResolveOptions{
+		Installation:         out.Multi.Installation,
+		Executable:           out.Multi.Executable,
+		Requested:            requested,
+		RequireDetect:        c.Multi.versionSet || requested != "",
+		AllowExecutableProbe: allowExecutableProbe,
+	})
+	if probeErr != nil {
+		var versionErr *MultiVersionError
+		// A legacy/test installation may carry no release marker at all. Keep
+		// omitted-version configurations compatible while still failing closed
+		// for an explicit release or for damaged metadata.
+		if !c.Multi.versionSet && requested == "" && errors.As(probeErr, &versionErr) && !versionErr.MarkerFound && errors.Is(probeErr, ErrMultiVersionUnavailable) {
+			return out, nil
+		}
+		return Validated{}, Problems{{Field: "multi.version", Err: probeErr}}
+	}
+	out.Multi.Version = resolved.Version
+	out.Multi.VersionSource = resolved.Source
+	// Keep the wire-facing validated model backward-compatible when no release
+	// was observed. The resolver exposes an explicit `unknown` source to callers
+	// using optional detection, but check/status should omit source metadata until
+	// there is an actual version value to report.
+	if out.Multi.Version == "" {
+		out.Multi.VersionSource = ""
+	}
+	return out, nil
+}
+
+// validateStructure performs the non-executable portion of configuration
+// validation. Keeping this helper separate lets Load select an explicit probe
+// policy without duplicating the structural checks.
+func (c Config) validateStructure(baseDir string) (Validated, error) {
 	var out Validated
 	var problems Problems
 
@@ -105,6 +155,7 @@ func (c Config) Validate(baseDir string) (Validated, error) {
 
 	out.Multi.Installation = validateDirectory(&problems, "multi.installation", c.Multi.Installation, base)
 	out.Multi.Executable = validateFile(&problems, "multi.executable", c.Multi.Executable, base)
+	out.Multi.Version = validateMultiVersionSpec(&problems, c.Multi.Version, c.Multi.versionSet)
 	out.Multi.PythonVersion = validatePythonVersion(&problems, c.Multi.PythonVersion, c.Multi.pythonVersionSet)
 	if out.Multi.Installation != "" && out.Multi.Executable != "" && !within(out.Multi.Installation, out.Multi.Executable) {
 		problems = append(problems, Problem{"multi.executable", errors.New("must be inside multi.installation")})
@@ -192,6 +243,26 @@ func (c Config) Validate(baseDir string) (Validated, error) {
 		return Validated{}, problems
 	}
 	return out, nil
+}
+
+func validateMultiVersionSpec(problems *Problems, raw string, explicit bool) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		if explicit {
+			*problems = append(*problems, Problem{"multi.version", errors.New("is required when specified; use \"auto\" for discovery")})
+		}
+		return ""
+	}
+	if strings.EqualFold(value, MultiVersionAuto) {
+		// "auto" is a resolver directive, never an observed release value.
+		return ""
+	}
+	normalized, err := NormalizeMultiVersion(value)
+	if err != nil {
+		*problems = append(*problems, Problem{"multi.version", err})
+		return ""
+	}
+	return normalized
 }
 
 func validatePythonVersion(problems *Problems, raw int, explicit bool) int {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -125,6 +126,123 @@ func TestLoadRejectsExplicitZeroPythonVersion(t *testing.T) {
 	writeConfig(t, path, updated)
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.python_version") {
 		t.Fatalf("Load() error = %v, want explicit python version validation error", err)
+	}
+}
+
+func TestLoadAllowsExecutableSymlinkWithinInstallation(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	install := filepath.Join(dir, "multi")
+	if err := os.WriteFile(filepath.Join(install, "mpythonrun-real.exe"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(install, "mpythonrun.exe")
+	if err := os.Symlink(filepath.Join(install, "mpythonrun-real.exe"), linked); err != nil {
+		t.Skipf("symbolic links are unavailable in this test environment: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(content), `executable = "multi/multi.exe"`, `executable = "multi/mpythonrun.exe"`, 1)
+	writeConfig(t, path, updated)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load(in-install executable symlink) error = %v", err)
+	}
+}
+
+func TestLoadContextHonorsCancellationBeforeProbe(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := LoadContext(ctx, path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("LoadContext(canceled) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestLoadAutoDetectsAndChecksMultiVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "multi", ".about"), []byte("product = \"MULTI IDE\"\nversion = 0x1c5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "multi", "defaults", "licensing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "multi", "defaults", "licensing", "install_info.txt"), []byte("Product Release Name: MULTI IDE 8.1.4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(auto version) error = %v", err)
+	}
+	if got.Multi.Version != "8.1.4" || got.Multi.VersionSource != MultiVersionSourceInstallInfo {
+		t.Fatalf("auto-detected MULTI version = %#v", got.Multi)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matching := strings.Replace(string(content), `executable = "multi/multi.exe"`, "executable = \"multi/multi.exe\"\nversion = \"8.1.4\"", 1)
+	writeConfig(t, path, matching)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load(matching explicit version) error = %v", err)
+	}
+
+	mismatching := strings.Replace(matching, `version = "8.1.4"`, `version = "7.1.6"`, 1)
+	writeConfig(t, path, mismatching)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.version") || !strings.Contains(err.Error(), "requested") {
+		t.Fatalf("Load(mismatching explicit version) error = %v", err)
+	}
+
+	// A qualified release is not a prefix-compatible match. In particular,
+	// beta builds must not silently select the stable 8.1.4 installation.
+	beta := strings.Replace(matching, `version = "8.1.4"`, `version = "8.1.4beta"`, 1)
+	writeConfig(t, path, beta)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.version") || !strings.Contains(err.Error(), "requested") {
+		t.Fatalf("Load(beta explicit version) error = %v, want exact release mismatch", err)
+	}
+}
+
+func TestLoadExplicitAutoRequiresEvidence(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(content), `executable = "multi/multi.exe"`, "executable = \"multi/multi.exe\"\nversion = \"auto\"", 1)
+	writeConfig(t, path, updated)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.version") || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("Load(explicit auto without evidence) error = %v", err)
+	}
+}
+
+func TestLoadAllowsOmittedVersionWhenOnlyProductMarkerExists(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "multi", ".about"), []byte("product = \"MULTI IDE\"\nversion = 0x1c5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(product-only marker) error = %v", err)
+	}
+	if got.Multi.Version != "" || got.Multi.VersionSource != "" {
+		t.Fatalf("product-only marker resolved version = %#v, want unknown", got.Multi)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(content), `executable = "multi/multi.exe"`, "executable = \"multi/multi.exe\"\nversion = \"auto\"", 1)
+	writeConfig(t, path, updated)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multi.version") {
+		t.Fatalf("Load(explicit auto with product-only marker) error = %v, want multi.version failure", err)
 	}
 }
 

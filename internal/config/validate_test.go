@@ -220,6 +220,38 @@ func TestValidateAcceptsExplicitPython2(t *testing.T) {
 	}
 }
 
+func TestValidateResolvesMultiVersionWithoutExecutableProbe(t *testing.T) {
+	root := testFiles(t)
+	install := filepath.Join(root, "multi")
+	if err := os.WriteFile(filepath.Join(install, ".about"), []byte("product = \"MULTI IDE\"\nversion = 0x1c5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(install, "defaults", "licensing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(install, "defaults", "licensing", "install_info.txt"), []byte("Product Release Name: MULTI IDE 8.1.4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := validConfig().Validate(root)
+	if err != nil {
+		t.Fatalf("Validate(auto metadata) error = %v", err)
+	}
+	if got.Multi.Version != "8.1.4" || got.Multi.VersionSource != MultiVersionSourceInstallInfo {
+		t.Fatalf("Validate(auto metadata) multi = %#v", got.Multi)
+	}
+
+	cfg := validConfig()
+	cfg.Multi.Version = "8.1.4"
+	if _, err := cfg.Validate(root); err != nil {
+		t.Fatalf("Validate(matching explicit version) error = %v", err)
+	}
+	cfg.Multi.Version = "7.1.6"
+	if _, err := cfg.Validate(root); err == nil || !hasProblem(err, "multi.version") {
+		t.Fatalf("Validate(mismatching explicit version) error = %v, want multi.version", err)
+	}
+}
+
 func TestValidateLifecycleOverrideAndEndpointEdgePorts(t *testing.T) {
 	root := testFiles(t)
 	noReset := false

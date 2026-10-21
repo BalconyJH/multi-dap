@@ -343,6 +343,48 @@ func TestDetectMultiVersionAllowsLegacyMetadataFreeFixtureOnlyAsUnknownThroughLo
 	}
 }
 
+func TestLoadDoesNotExecuteGVersionUnlessExplicitlyRequested(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	installTestGVersion(t, filepath.Join(dir, "multi"))
+	marker := filepath.Join(dir, "probe-ran")
+	t.Setenv("MULTI_DAP_CONFIG_GVERSION_MARKER", marker)
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("metadata-only Load() error = %v", err)
+	}
+	if got.Multi.Version != "" || fileExists(marker) {
+		t.Fatalf("metadata-only Load() = %#v, gversion marker exists=%v", got.Multi, fileExists(marker))
+	}
+
+	got, err = LoadWithExecutableProbe(path)
+	if err != nil {
+		t.Fatalf("explicit executable-probe Load() error = %v", err)
+	}
+	if got.Multi.Version != "8.1.4" || got.Multi.VersionSource != MultiVersionSourceGVersion || !fileExists(marker) {
+		t.Fatalf("executable-probe Load() = %#v, marker exists=%v", got.Multi, fileExists(marker))
+	}
+}
+
+func TestLoadRejectsDamagedMetadataBeforeExecutableProbe(t *testing.T) {
+	dir := t.TempDir()
+	path := writeValidConfig(t, dir)
+	install := filepath.Join(dir, "multi")
+	installTestGVersion(t, install)
+	if err := os.WriteFile(filepath.Join(install, "install_summary.txt"), []byte("Installing \"MULTI IDE 8.1.4/garbage\" to \"x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "probe-ran")
+	t.Setenv("MULTI_DAP_CONFIG_GVERSION_MARKER", marker)
+	if _, err := LoadWithExecutableProbe(path); err == nil || !strings.Contains(err.Error(), "multi.version") || !strings.Contains(err.Error(), "metadata") {
+		t.Fatalf("damaged metadata LoadWithExecutableProbe() error = %v", err)
+	}
+	if fileExists(marker) {
+		t.Fatal("damaged metadata was bypassed by executing gversion")
+	}
+}
+
 func TestProbeMultiVersionReportsGVersionFailure(t *testing.T) {
 	dir := t.TempDir()
 	installTestGVersion(t, dir)

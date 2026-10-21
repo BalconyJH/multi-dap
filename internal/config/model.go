@@ -25,6 +25,10 @@ type Config struct {
 type MultiConfig struct {
 	Installation string `toml:"installation"`
 	Executable   string `toml:"executable"`
+	// Version is an optional MULTI IDE release constraint. When omitted, the
+	// loader probes the selected installation and records the detected release.
+	// Set it to "auto" to require successful automatic detection explicitly.
+	Version string `toml:"version"`
 	// PythonVersion selects the embedded Python runtime used by mpythonrun.
 	// The zero value is treated as Python 3, which is the preferred runtime for
 	// current MULTI installations. Set it to PythonVersion2 explicitly when a
@@ -35,6 +39,10 @@ type MultiConfig struct {
 	// omitted field (the zero-value default) from an explicit invalid zero.
 	// Directly constructed Config values retain the zero-value default.
 	pythonVersionSet bool
+
+	// versionSet distinguishes an omitted version from an explicit "auto" or
+	// empty value when loading TOML.
+	versionSet bool
 }
 
 // Supported embedded Python runtimes exposed by MULTI's mpythonrun.

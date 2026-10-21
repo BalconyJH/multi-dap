@@ -65,6 +65,7 @@ func TestBindingDigestChangesForEveryRuntimeField(t *testing.T) {
 	}{
 		{"multi installation", func(v *Validated) { v.Multi.Installation = `C:\MULTI-alt` }},
 		{"multi executable", func(v *Validated) { v.Multi.Executable = `C:\MULTI\bin\alt.exe` }},
+		{"multi version", func(v *Validated) { v.Multi.Version = "7.1.6d" }},
 		{"multi Python version", func(v *Validated) { v.Multi.PythonVersion = PythonVersion2 }},
 		{"connection project", func(v *Validated) { v.Connection.Project = `C:\work\alt.cmp` }},
 		{"connection arguments", func(v *Validated) { v.Connection.Arguments = `usb=other` }},
@@ -117,6 +118,7 @@ func bindingTestValidated() Validated {
 		Multi: ValidatedMulti{
 			Installation:  `C:\MULTI`,
 			Executable:    `C:\MULTI\bin\mpythonrun.exe`,
+			Version:       "8.1.4",
 			PythonVersion: PythonVersion3,
 		},
 		Connection: ValidatedConnection{
