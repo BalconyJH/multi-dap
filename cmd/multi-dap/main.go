@@ -73,6 +73,7 @@ type multiVersionMessage struct {
 type terminalMessage struct {
 	Event          string                         `json:"event"`
 	Found          bool                           `json:"found"`
+	MultiVersion   string                         `json:"multi_version,omitempty"`
 	ProbeID        string                         `json:"probe_id,omitempty"`
 	PID            int                            `json:"pid,omitempty"`
 	Phase          control.TerminalPhase          `json:"phase,omitempty"`
@@ -224,7 +225,8 @@ func runServe(ctx context.Context, args []string, stdout io.Writer) (runErr erro
 			}
 			return control.Status{
 				ProbeID: validated.Probe.ID, PID: os.Getpid(), DAPAddress: runtime.DAPAddress(),
-				TargetState: targetStateName(snapshot.State), ExecutionEpoch: uint64(snapshot.ExecutionEpoch), StopEpoch: uint64(snapshot.StopEpoch),
+				MultiVersion: validated.Multi.Version,
+				TargetState:  targetStateName(snapshot.State), ExecutionEpoch: uint64(snapshot.ExecutionEpoch), StopEpoch: uint64(snapshot.StopEpoch),
 				DAPOwned: breakpoints.DAPOwned, Pending: breakpoints.Pending, Orphaned: breakpoints.Orphaned,
 			}, nil
 		},
@@ -671,13 +673,13 @@ func runDiagnose(args []string, stdout io.Writer) error {
 	}
 	terminal, err := store.LoadTerminalForConfig(validated.Probe.ID, digest)
 	if errors.Is(err, control.ErrNoTerminalRecord) {
-		return json.NewEncoder(stdout).Encode(terminalMessage{Event: "terminal_diagnostic", Found: false})
+		return json.NewEncoder(stdout).Encode(terminalMessage{Event: "terminal_diagnostic", Found: false, MultiVersion: validated.Multi.Version})
 	}
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(stdout).Encode(terminalMessage{
-		Event: "terminal_diagnostic", Found: true, ProbeID: terminal.ProbeID, PID: terminal.PID,
+		Event: "terminal_diagnostic", Found: true, MultiVersion: validated.Multi.Version, ProbeID: terminal.ProbeID, PID: terminal.PID,
 		Phase: terminal.Phase, Classification: terminal.Classification, Operation: terminal.Operation, OccurredAt: &terminal.OccurredAt,
 	})
 }
