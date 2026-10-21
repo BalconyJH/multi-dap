@@ -29,6 +29,51 @@ import (
 const testConfigDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 const otherTestConfigDigest = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 
+func TestIsProcessStdoutRecognizesOnlyTheProcessHandle(t *testing.T) {
+	if !isProcessStdout(os.Stdout) {
+		t.Fatal("isProcessStdout(os.Stdout) = false, want true")
+	}
+	temporary, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer temporary.Close()
+	if isProcessStdout(temporary) {
+		t.Fatal("isProcessStdout(temporary) = true, want false")
+	}
+}
+
+func TestServePreparesProcessConsoleBeforeConfigLoading(t *testing.T) {
+	previous := prepareServeConsole
+	t.Cleanup(func() { prepareServeConsole = previous })
+	consoleErr := errors.New("console preparation failed")
+	for _, test := range []struct {
+		name    string
+		stdout  io.Writer
+		prepare bool
+	}{
+		{"process stdout", os.Stdout, true},
+		{"caller-owned writer", io.Discard, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			prepareServeConsole = func() error {
+				calls++
+				return consoleErr
+			}
+			missingConfig := filepath.Join(t.TempDir(), "missing.toml")
+			err := runServe(context.Background(), []string{"--config", missingConfig}, test.stdout)
+			if test.prepare {
+				if calls != 1 || !errors.Is(err, consoleErr) {
+					t.Fatalf("console calls = %d, error = %v, want console failure before config loading", calls, err)
+				}
+			} else if calls != 0 || err == nil || errors.Is(err, consoleErr) {
+				t.Fatalf("console calls = %d, error = %v, want config failure without console preparation", calls, err)
+			}
+		})
+	}
+}
+
 func bindingDigestForPath(t *testing.T, path string) string {
 	t.Helper()
 	validated, err := config.Load(path)

@@ -44,6 +44,12 @@ var startRuntime runtimeStarter = func(ctx context.Context, options daemon.Optio
 	return daemon.Start(ctx, options)
 }
 
+// prepareServeConsole is replaceable in tests. Direct `serve` invocations can
+// be launched by an IDE or a redirected shell, where mpythonrun would receive
+// a pipe/NUL handle instead of a real console handle. The ensure child already
+// performs this preparation itself.
+var prepareServeConsole = prepareBridgeConsole
+
 type readyMessage struct {
 	Event      string `json:"event"`
 	DAPAddress string `json:"dap_address"`
@@ -147,6 +153,11 @@ func runServe(ctx context.Context, args []string, stdout io.Writer) (runErr erro
 			return err
 		}
 		if err := acquireEnsureChild(); err != nil {
+			return err
+		}
+	}
+	if !*ensureChild && isProcessStdout(stdout) {
+		if err := prepareServeConsole(); err != nil {
 			return err
 		}
 	}
@@ -299,6 +310,11 @@ func runServe(ctx context.Context, args []string, stdout io.Writer) (runErr erro
 		return nil
 	}
 	return runtimeErr
+}
+
+func isProcessStdout(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	return ok && file == os.Stdout
 }
 
 func classifyTerminal(err error) control.TerminalClassification {

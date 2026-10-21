@@ -721,9 +721,10 @@ license and failed. The router port is discovered runtime state and is never a f
 **`mpythonrun` must be launched with its own console and with its standard handles left
 alone.** It writes stdout through `WriteConsole`; redirecting stdout to a pipe or a file
 raises a modal Windows dialog (`WriteConsole(handle=0x...) for STD_OUTPUT_HANDLE failed`) and
-the process stalls. The daemon therefore spawns it with `CREATE_NEW_CONSOLE` and captures
-nothing. This is independent support for the decision above: stdout was never a usable
-channel, so the bridge had to own a socket regardless.
+the process stalls. The daemon therefore spawns it with `CREATE_NEW_CONSOLE`, repairs an
+invalid parent console handle before direct `serve` launches, and captures nothing. This is
+independent support for the decision above: stdout was never a usable channel, so the bridge
+had to own a socket regardless.
 
 Fallback if M0-2 shows a resident socket loop cannot coexist with MULTI-Python calls: Go
 speaks the mpythonrun REPL socket directly, with all prompt-convergence logic confined to a
