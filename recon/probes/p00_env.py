@@ -1,5 +1,5 @@
-# Python 2.7 - M0 recon probe: environment sanity check.
-# Runs under MULTI-Python (Python 2.7) via mpythonrun. Confirms which interpreter,
+# MULTI Python 3/2 - M0 recon probe: environment sanity check.
+# Runs under the selected MULTI-Python runtime via mpythonrun. Confirms which interpreter,
 # which builtins, and which import surface reconlib's explicit session APIs can
 # rely on.
 # No target contact.

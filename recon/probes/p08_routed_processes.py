@@ -1,4 +1,4 @@
-# Python 2.7. Read-only M0 evidence for route-to-process correspondence.
+# Python 3/2. Read-only M0 evidence for route-to-process correspondence.
 #
 # It discovers route PIDs from the live component listing, then reads `P`
 # through each route. Evidence contains only parser-checked shape, status, and
@@ -11,6 +11,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 import reconlib
 
+try:
+    _STRING_TYPES = (basestring,)
+except NameError:
+    _STRING_TYPES = (str,)
+
 
 def command_shape(session, command):
     result = reconlib.run_command(session, command)
@@ -19,7 +24,8 @@ def command_shape(session, command):
         "accepted": result.get("accepted") is True,
         "status": result.get("status"),
         "raw_present": bool(raw),
-        "raw_line_count": len(raw.splitlines()) if isinstance(raw, basestring) else 0,
+        "raw_line_count": (len(raw.splitlines())
+                           if isinstance(raw, _STRING_TYPES) else 0),
     }
 
 

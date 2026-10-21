@@ -1,4 +1,4 @@
-# Python 2.7. M2 future evidence: per-core source-presence API inventory.
+# Python 3/2. M2 future evidence: per-core source-presence API inventory.
 #
 # This probe is warm-only and inventory-only. It never sends a debugger command:
 # in particular it does not guess an `e` form and never uses breakpoint
@@ -11,6 +11,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 import reconlib
+
+try:
+    _STRING_TYPES = (basestring,)
+except NameError:
+    _STRING_TYPES = (str,)
 
 
 SOURCE_INVENTORY_TERMS = ("browse", "source", "file", "line", "module")
@@ -37,7 +42,7 @@ def configured_cores(cfg):
         if not isinstance(core, dict):
             raise RuntimeError("M2 source-known core entry must be an object")
         elf = core.get("elf")
-        if (not isinstance(elf, basestring) or not elf or elf.startswith("<") or
+        if (not isinstance(elf, _STRING_TYPES) or not elf or elf.startswith("<") or
                 "\n" in elf or "\r" in elf):
             raise RuntimeError("M2 source-known core requires an explicit ELF")
         normalized_elf = reconlib._normalized_program_name(elf)
