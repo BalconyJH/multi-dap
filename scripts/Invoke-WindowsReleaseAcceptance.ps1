@@ -12,11 +12,27 @@ param(
     [ValidatePattern('^$|^[0-9A-Fa-f]{7,40}$')]
     [string]$Commit = '',
 
-    [string]$MultiPython
+    # Explicit standalone interpreters.  -MultiPython is retained as a
+    # Python 2 compatibility alias for existing release automation.
+    [string]$MultiPython,
+
+    [string]$MultiPython3,
+
+    [string]$MultiPython2
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ((-not [string]::IsNullOrWhiteSpace($MultiPython3)) -and
+    ((-not [string]::IsNullOrWhiteSpace($MultiPython2)) -or
+     (-not [string]::IsNullOrWhiteSpace($MultiPython)))) {
+    throw 'choose one of -MultiPython3 or the Python 2 compatibility options'
+}
+if ((-not [string]::IsNullOrWhiteSpace($MultiPython2)) -and
+    (-not [string]::IsNullOrWhiteSpace($MultiPython))) {
+    throw 'choose one of -MultiPython2 or the legacy -MultiPython alias'
+}
 
 function Add-ReleaseResult {
     param(
@@ -83,20 +99,115 @@ function Invoke-NativeCommand {
     }
 }
 
-function Resolve-MultiPython {
-    param([string]$RequestedPath)
+function Get-MultiPythonVersion {
+    param([Parameter(Mandatory)] [string]$Path)
 
-    $candidates = @($RequestedPath, $env:MULTI_PYTHON)
+    try {
+        $output = @(& $Path -c 'import sys; print(sys.version_info[0])' 2>&1)
+    } catch {
+        # Automatic discovery must be able to skip a stale, non-executable,
+        # or partially removed installation and continue to the next runtime.
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0 -or $output.Count -eq 0) {
+        return $null
+    }
+    $lines = @($output | ForEach-Object { [string]$_ } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -eq 0) {
+        return $null
+    }
+    $text = $lines[$lines.Count - 1].Trim()
+    if ($text -notmatch '^[23]$') {
+        return $null
+    }
+    return [int]$text
+}
+
+function Add-UniquePath {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[string]]$Paths,
+        [string]$Path
+    )
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    if (-not $Paths.Contains($Path)) { [void]$Paths.Add($Path) }
+}
+
+function Resolve-MultiPython {
+    param(
+        [string]$RequestedPython3,
+        [string]$RequestedPython2,
+        [string]$LegacyRequestedPath
+    )
+
+    $roots = [System.Collections.Generic.List[string]]::new()
     foreach ($installationVariable in 'MULTI_INSTALLATION', 'GHS_MULTI_ROOT') {
         $installation = [Environment]::GetEnvironmentVariable($installationVariable)
-        if (-not [string]::IsNullOrWhiteSpace($installation)) {
-            $candidates += (Join-Path $installation 'python\python.exe')
+        Add-UniquePath -Paths $roots -Path $installation
+    }
+
+    $python3 = [System.Collections.Generic.List[string]]::new()
+    $python2 = [System.Collections.Generic.List[string]]::new()
+    Add-UniquePath -Paths $python3 -Path $RequestedPython3
+    Add-UniquePath -Paths $python2 -Path $RequestedPython2
+    Add-UniquePath -Paths $python2 -Path $LegacyRequestedPath
+    Add-UniquePath -Paths $python3 -Path $env:MULTI_PYTHON3
+    Add-UniquePath -Paths $python2 -Path $env:MULTI_PYTHON2
+    # MULTI_PYTHON is the historical generic variable.  Classify it by its
+    # reported major version rather than assuming it is always Python 2.
+    Add-UniquePath -Paths $python3 -Path $env:MULTI_PYTHON
+    Add-UniquePath -Paths $python2 -Path $env:MULTI_PYTHON
+
+    foreach ($root in $roots) {
+        foreach ($relative in 'python-3.8.6\python.exe', 'python3\python.exe', 'python38\python.exe') {
+            Add-UniquePath -Paths $python3 -Path (Join-Path $root $relative)
+        }
+        Add-UniquePath -Paths $python2 -Path (Join-Path $root 'python\python.exe')
+    }
+
+    $explicit3 = -not [string]::IsNullOrWhiteSpace($RequestedPython3)
+    $explicit2 = -not [string]::IsNullOrWhiteSpace($RequestedPython2) -or
+        -not [string]::IsNullOrWhiteSpace($LegacyRequestedPath)
+    $queues = @()
+    if ($explicit3) {
+        # An explicit command-line path is authoritative.  Do not silently
+        # replace a missing or mismatched release-test interpreter with an
+        # environment variable or another installation.
+        $requested = [System.Collections.Generic.List[string]]::new()
+        Add-UniquePath -Paths $requested -Path $RequestedPython3
+        $queues = @(@{ Paths = $requested; Expected = 3; Label = 'Python 3' })
+    } elseif ($explicit2) {
+        $requested = [System.Collections.Generic.List[string]]::new()
+        Add-UniquePath -Paths $requested -Path $RequestedPython2
+        Add-UniquePath -Paths $requested -Path $LegacyRequestedPath
+        $queues = @(@{ Paths = $requested; Expected = 2; Label = 'Python 2' })
+    } else {
+        # Python 3 is the preferred release check.  Python 2 is used only when
+        # no usable Python 3 interpreter is present.
+        $queues = @(
+            @{ Paths = $python3; Expected = 3; Label = 'Python 3' },
+            @{ Paths = $python2; Expected = 2; Label = 'Python 2 fallback' }
+        )
+    }
+
+    foreach ($queue in $queues) {
+        foreach ($candidate in $queue.Paths) {
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            $resolved = (Resolve-Path -LiteralPath $candidate).Path
+            $version = Get-MultiPythonVersion -Path $resolved
+            if ($null -eq $version) { continue }
+            if ($version -ne $queue.Expected) {
+                if ($explicit3 -or $explicit2) {
+                    throw "$($queue.Label) interpreter has unexpected version: $resolved"
+                }
+                continue
+            }
+            return [pscustomobject]@{ Path = $resolved; Version = $version }
         }
     }
-    foreach ($candidate in $candidates) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            return (Resolve-Path -LiteralPath $candidate).Path
-        }
+    if ($explicit3 -or $explicit2) {
+        $label = if ($explicit3) { 'Python 3' } else { 'Python 2' }
+        throw "requested $label interpreter was not usable"
     }
     return $null
 }
@@ -262,7 +373,6 @@ $failure = $null
 $previousProxy = $env:GOPROXY
 $previousPythonDontWriteBytecode = $env:PYTHONDONTWRITEBYTECODE
 $previousLocation = Get-Location
-$compileDirectory = $null
 
 try {
     Set-Location -LiteralPath $repositoryRoot
@@ -460,25 +570,30 @@ try {
             Invoke-NativeCommand -FilePath 'go' -Arguments @('test', '-mod=readonly', '-race', './...') -Description 'go test -race'
         }
 
-        $multiPythonPath = Resolve-MultiPython -RequestedPath $MultiPython
-        if ($null -eq $multiPythonPath) {
-            Skip-ReleaseStep -Results $results -Name 'multi-python2-py-compile' -Reason 'MULTI Python 2 was not configured; pass -MultiPython or set MULTI_PYTHON'
+        $resolvedMultiPython = Resolve-MultiPython -RequestedPython3 $MultiPython3 -RequestedPython2 $MultiPython2 -LegacyRequestedPath $MultiPython
+        if ($null -eq $resolvedMultiPython) {
+            Skip-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Reason 'No usable standalone MULTI Python 3 or Python 2 interpreter was found; pass -MultiPython3, -MultiPython2, or set MULTI_INSTALLATION/GHS_MULTI_ROOT'
         } else {
-            Invoke-ReleaseStep -Results $results -Name 'multi-python2-py-compile' -Action {
-                $version = & $multiPythonPath --version 2>&1
-                if ($LASTEXITCODE -ne 0 -or ($version -notmatch 'Python 2\.')) {
-                    throw "MULTI Python interpreter is not usable as Python 2: $multiPythonPath ($version)"
+            Invoke-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Action {
+                $runtimeLabel = "Python $($resolvedMultiPython.Version)"
+                $compileDirectory = $null
+                try {
+                    $compileDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("multi-dap-release-acceptance-" + [guid]::NewGuid().ToString('N'))
+                    [System.IO.Directory]::CreateDirectory($compileDirectory) | Out-Null
+                    $sources = @(
+                        (Join-Path $repositoryRoot 'bridge\bridge.py'),
+                        (Join-Path $repositoryRoot 'recon\lib\reconlib.py'),
+                        (Join-Path $repositoryRoot 'recon\run.py'),
+                        (Join-Path $repositoryRoot 'recon\tools\p02_client.py'),
+                        (Join-Path $repositoryRoot 'recon\notifier.py')
+                    ) + @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'recon\probes') -Filter '*.py' -File | Sort-Object FullName | ForEach-Object FullName)
+                    $compiler = 'import os,py_compile,sys; out=sys.argv[1]; [py_compile.compile(path, os.path.join(out, str(index) + ".pyc"), doraise=True) for index,path in enumerate(sys.argv[2:])]'
+                    Invoke-NativeCommand -FilePath $resolvedMultiPython.Path -Arguments (@('-B', '-c', $compiler, $compileDirectory) + $sources) -Description "MULTI $runtimeLabel py_compile"
+                } finally {
+                    if ($null -ne $compileDirectory) {
+                        Remove-OwnedTemporaryDirectory -Path $compileDirectory
+                    }
                 }
-                $compileDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("multi-dap-release-acceptance-" + [guid]::NewGuid().ToString('N'))
-                [System.IO.Directory]::CreateDirectory($compileDirectory) | Out-Null
-                $sources = @(
-                    (Join-Path $repositoryRoot 'bridge\bridge.py'),
-                    (Join-Path $repositoryRoot 'recon\lib\reconlib.py'),
-                    (Join-Path $repositoryRoot 'recon\run.py'),
-                    (Join-Path $repositoryRoot 'recon\notifier.py')
-                ) + @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'recon\probes') -Filter '*.py' -File | Sort-Object FullName | ForEach-Object FullName)
-                $compiler = 'import os,py_compile,sys; out=sys.argv[1]; [py_compile.compile(path, os.path.join(out, str(index) + ".pyc"), doraise=True) for index,path in enumerate(sys.argv[2:])]'
-                Invoke-NativeCommand -FilePath $multiPythonPath -Arguments (@('-B', '-c', $compiler, $compileDirectory) + $sources) -Description 'MULTI Python 2 py_compile'
             }
         }
 
@@ -490,7 +605,7 @@ try {
         }
     } else {
         Skip-ReleaseStep -Results $results -Name 'go-test-race' -Reason 'Fast mode omits race instrumentation'
-        Skip-ReleaseStep -Results $results -Name 'multi-python2-py-compile' -Reason 'Fast mode omits MULTI Python 2 compilation'
+        Skip-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Reason 'Fast mode omits MULTI embedded Python compilation'
         Skip-ReleaseStep -Results $results -Name 'windows-package-reproducibility' -Reason 'Fast mode omits the two-build package check'
         Skip-ReleaseStep -Results $results -Name 'winget-manifest' -Reason 'Fast mode omits WinGet manifest validation'
     }
@@ -499,9 +614,6 @@ try {
 } catch {
     $failure = $_.Exception.Message
 } finally {
-    if ($null -ne $compileDirectory) {
-        Remove-OwnedTemporaryDirectory -Path $compileDirectory
-    }
     $env:GOPROXY = $previousProxy
     $env:PYTHONDONTWRITEBYTECODE = $previousPythonDontWriteBytecode
     Set-Location -LiteralPath $previousLocation

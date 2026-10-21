@@ -4,6 +4,12 @@ The first supported distribution target is a deterministic Windows amd64 ZIP.
 Release publication is separate from hardware qualification: the release notes
 must repeat every relevant boundary from the [capability matrix](capabilities.md).
 
+The current compatibility profile is MULTI IDE 8.1.4 with Compiler 2024.1.4 /
+Probe 6.6.8. Python 3 is the preferred embedded bridge runtime;
+Python 2.7 is retained only as an explicit configuration fallback. The local
+interpreter and no-target bridge checks establish runtime compatibility, not
+target qualification.
+
 ## Current release prerequisites
 
 The public repository and packaged binary use the MIT License. `LICENSE` and
@@ -19,8 +25,13 @@ The remaining prerequisites are:
 
 1. The release must be built from a reviewed, committed revision. A dirty or
    partially untracked working tree is not a release source.
-2. MULTI Python 2 compilation should pass on the release host, or its explicit
-   skip must be accepted and recorded by the release owner.
+2. The current MULTI 8 Python 3 no-target smoke and bridge check must be
+   recorded for the supported profile. Full release acceptance then compiles
+   the bridge with a discovered standalone MULTI Python 3 interpreter first;
+   Python 2 is used only as the explicit compatibility fallback when Python 3
+   is unavailable or `-MultiPython2` (the retained `-MultiPython` alias) is
+   requested. If no standalone runtime is available, the compile step's skip
+   must be accepted and recorded by the release owner.
 3. The canonical public GitHub repository must record a successful hosted CI
    run with the required rulesets and protected environments in place.
 
@@ -166,11 +177,12 @@ version/hash pair.
 ## Why uv and Homebrew are deferred
 
 `uv` is used to run host tests and the locked, non-package documentation
-environment, but this repository is not a Python application package.
-The production bridge requires MULTI's Python 2.7 and proprietary modules that
-cannot be declared as ordinary PyPI dependencies. A future `uv tool install`
-surface would need a separate supported Python 3 launcher with signed binary
-download and verification logic.
+environment, but this repository is not a Python application package. The
+production bridge uses MULTI's embedded Python 3 by default (with an explicit
+Python 2.7 fallback) and proprietary modules that cannot be declared as
+ordinary PyPI dependencies. A future `uv tool install` surface would still need
+a signed binary download and verification path for the selected MULTI runtime;
+it cannot replace the vendor-provided embedded modules.
 
 Homebrew targets macOS and Linux, while the production launcher intentionally
 returns unsupported on non-Windows systems. Publishing a formula would install
