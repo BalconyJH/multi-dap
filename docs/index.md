@@ -10,7 +10,9 @@ hide:
 
 `multi-dap` exposes a Green Hills MULTI debug session through the Debug Adapter
 Protocol (DAP). A Go daemon owns protocol state and orchestration; a narrow
-Python 2.7 bridge performs the calls that must run inside MULTI.
+bridge performs the calls that must run inside MULTI. MULTI 8 uses embedded
+Python 3 by default; the same source remains available under Python 2.7 as an
+explicit legacy fallback.
 
 !!! warning "Release and evidence boundary"
 
@@ -32,7 +34,7 @@ Python 2.7 bridge performs the calls that must run inside MULTI.
 ```mermaid
 flowchart LR
     IDE["CLion or VS Code"] -->|DAP| daemon["multi-dap daemon<br/>Go"]
-    daemon -->|"MBP v1 over loopback"| bridge["bridge.py<br/>MULTI Python 2.7"]
+    daemon -->|"MBP v1 over loopback"| bridge["bridge.py<br/>MULTI Python 3 (default)"]
     bridge --> multi["Green Hills MULTI"]
     multi --> probe["debug probe"]
     probe --> target["embedded target"]

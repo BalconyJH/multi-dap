@@ -1,7 +1,9 @@
 # multi-dap Windows package
 
-This package contains the `multi-dap.exe` daemon and the Python 2.7 bridge that
-it launches through the local Green Hills MULTI `mpythonrun.exe`.
+This package contains the `multi-dap.exe` daemon and the bridge source that it
+launches through the local Green Hills MULTI `mpythonrun.exe`. MULTI 8 uses its
+embedded Python 3 runtime by default; Python 2.7 remains an explicit fallback
+through the project configuration.
 
 ## Contents
 
@@ -116,6 +118,7 @@ separately licensed external prerequisite and is not included in this package.
 
 Before release, also run the default full mode of
 `scripts/Invoke-WindowsReleaseAcceptance.ps1` in the source repository. Without downloading Go
-dependencies, it runs host tests, available MULTI Python 2 compilation checks, and reproducibility
+dependencies, it runs host tests, available MULTI Python 3 compilation checks
+(with an explicit Python 2 fallback), and reproducibility
 plus manifest/allowlist validation for two independent ZIPs. See
 `docs/m6-packaging-and-editors.md` for details.

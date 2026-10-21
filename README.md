@@ -1,6 +1,6 @@
 # multi-dap
 
-`multi-dap` exposes Green Hills MULTI debugging sessions as a local Debug Adapter Protocol (DAP) service. The debugger core and DAP frontend are implemented in Go; `bridge.py` handles only Python 2.7 MULTI API integration.
+`multi-dap` exposes Green Hills MULTI debugging sessions as a local Debug Adapter Protocol (DAP) service. The debugger core and DAP frontend are implemented in Go; `bridge.py` handles only the MULTI API integration and runs under embedded Python 3 by default (with an explicit Python 2.7 fallback).
 
 > **Pre-release:** this public repository is licensed under MIT, and the host
 > software and deterministic Windows package are extensively tested. No public
@@ -72,11 +72,36 @@ Hardware has demonstrated that cold `DebugProgram` / `ConnectToTarget` returns; 
 
 Cold bootstrap attempts typed `close` rollback after a subsequent `cores` or initial-state failure only after `open` has returned explicit success from the same bridge generation. Warm sessions and unconfirmed opens are never closed. Uncertain rollback itself fails closed. This is the lifecycle host-test behavioral boundary, not a conclusion about hardware-session recovery.
 
+The current local compatibility target is MULTI IDE 8.1.4
+with Compiler 2024.1.4 / Probe 6.6.8. The configuration
+loader can identify the MULTI release automatically; set `multi.version` to a
+concrete value such as `"8.1.4"` when an exact installation constraint is
+needed, or leave it omitted/`"auto"` for discovery. Python 3 is the default
+embedded bridge runtime; set `multi.python_version = 2` only as a legacy
+fallback. The versioned environment checks and their evidence boundary are
+recorded in [verification evidence](docs/verification-evidence.md).
+
 For remaining hardware boundaries, see [M0 findings](docs/m0-findings.md); for the complete design, see [architecture](docs/architecture.md).
 
 ## Configuration and startup
 
 Copy [multi-dap.example.toml](multi-dap.example.toml), then fill in local absolute paths and target-server parameters. Every TCP/UDP endpoint must use a numeric loopback address; port `0` is assigned by the operating system.
+
+Before completing a project file, a release can be checked without starting
+MULTI:
+
+```powershell
+multi-dap multi-version --installation C:\path\to\multi_814
+```
+
+The standalone command reports the release found by the installation metadata
+by default. Add `--allow-executable-probe` when a metadata-free installation
+must be inspected with its `gversion.exe` tool; this is an explicit opt-in
+because it executes a program from the selected installation. Configuration
+loading and `check` use the metadata-only path, so they never execute an
+installation tool. Set
+`multi.version = "8.1.4"` to make the detected release a configuration
+constraint; omission or `"auto"` selects automatic detection.
 
 If Memory View or Disassembly View sends a numeric-only address, a single-core configuration may omit `[inspection]`. A multi-core configuration must explicitly set `inspection.default_core` to a configured `[[cores]].id` so an address is not read from the wrong physical address space. This does not affect DAP requests carrying a core-qualified reference.
 

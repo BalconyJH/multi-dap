@@ -1,4 +1,4 @@
-"""Loopback-only MULTI Bridge Protocol v1 server for MULTI-Python 2.7."""
+"""Loopback-only MULTI Bridge Protocol v1 server for MULTI-Python 3/2."""
 
 from __future__ import absolute_import
 

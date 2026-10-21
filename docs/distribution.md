@@ -9,10 +9,10 @@ project configuration.
 
 | Environment | Production status | Notes |
 |---|---|---|
-| Windows amd64 workstation with licensed Green Hills MULTI | Supported distribution target | MULTI must provide its Python 2.7 runtime and modules locally. |
+| Windows amd64 workstation with licensed Green Hills MULTI 8.1.4 | Supported distribution target | Python 3.8.6 is selected by default; Python 2.7 is an explicit fallback. Compiler 2024.1.4 / Probe 6.6.8 remains a separate toolchain installation. |
 | Windows arm64 or x86 | Unsupported | No release archive or hardware qualification is provided. |
 | macOS or Linux | Unsupported production runtime | Go host tests may run there, but the MULTI launcher rejects non-Windows execution. |
-| Python 3 and `uv` | Development only | Used for host tests and documentation, not for the production bridge. |
+| Python 3 and `uv` | Mixed role | MULTI 8's embedded Python 3.8.6 is the preferred production bridge runtime; `uv`'s Python 3 remains host-test/documentation tooling. |
 
 No public release has been issued yet. Package-manager commands below describe
 the intended post-publication interface, not a currently available package.
@@ -141,8 +141,9 @@ initial activation boundary is complete.
 
 `uv` is intentionally limited to Python 3 host tests and the locked
 documentation environment. The production bridge must execute with the
-proprietary Python 2.7 modules supplied by Green Hills MULTI, so this project
-is not a PyPI/`uv tool install` package.
+proprietary modules supplied by Green Hills MULTI's embedded Python 3 runtime
+(or the explicitly selected Python 2.7 fallback), so this project is not a
+PyPI/`uv tool install` package.
 
 Homebrew is intentionally deferred. Its usual macOS and Linux targets are not
 production runtime platforms for `multi-dap`; publishing a formula today would
