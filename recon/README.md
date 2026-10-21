@@ -3,6 +3,24 @@
 This directory answers the nine M0 blockers of `docs/architecture.md` §12 with recorded,
 reproducible evidence gathered against real MULTI hardware sessions.
 
+The current compatibility profile is MULTI IDE 8.1.4,
+paired with Compiler 2024.1.4 / Probe 6.6.8. The
+preferred embedded runtime is Python 3. Set `"python_version": 3` in the
+ignored local configuration (the example already does) or pass
+`--python-version 3` to `recon/run.py`; pass `--python-version 2` only when
+intentionally exercising the Python 2.7 fallback. The runner pins
+`GHS_IDE_USE_PYTHON3` for the child and does not perform an implicit interpreter
+retry, so an inherited environment value cannot override the selected version.
+The 8.1.4 checks recorded in
+[verification-evidence.md](../docs/verification-evidence.md) are no-target
+interpreter/module and bridge smoke checks only.
+
+The committed M0 hardware evidence and several probes predate this profile and
+were authored/validated under Python 2.7. Keep their historical labels and
+run them under the explicit fallback until an individual probe has a recorded
+Python 3 hardware result; do not infer target qualification from the newer
+interpreter smoke.
+
 ## One hardware owner at a time
 
 The debug probe and the target board are a single shared resource. No two probes, and no
@@ -25,12 +43,14 @@ nested in a step result, note, or step metadata.
 
 ## Probes never print
 
-Probe scripts run under `mpythonrun.exe`, MULTI's embedded Python 2.7 interpreter, and its
-standard output is written with `WriteConsole`. Redirecting that handle to a pipe or a file
-raises a modal Windows error dialog instead of failing cleanly. Probes therefore never write to
-stdout: every result goes to a JSON evidence file via `reconlib.Recorder`, and the host runner
-launches `mpythonrun.exe` with a brand new console window and never redirects its standard
-handles.
+Probe scripts run under `mpythonrun.exe` and the selected MULTI embedded
+interpreter. On MULTI 8.1.4, Python 3 is the preferred selection; Python 2.7 is
+an explicit fallback as described above. In either runtime, `mpythonrun.exe`
+writes standard output with `WriteConsole`. Redirecting that handle to a pipe or
+a file raises a modal Windows error dialog instead of failing cleanly. Probes
+therefore never write to stdout: every result goes to a JSON evidence file via
+`reconlib.Recorder`, and the host runner launches `mpythonrun.exe` with a brand
+new console window and never redirects its standard handles.
 
 ## Running a probe
 
@@ -38,10 +58,16 @@ handles.
 uv run --no-project --python 3.12 recon/run.py <probe_stem> [-- extra args]
 ```
 
-For example:
+For example (Python 3 is the default):
 
 ```
 uv run --no-project --python 3.12 recon/run.py p00_env
+```
+
+Historical Python 2 evidence can be reproduced explicitly:
+
+```
+uv run --no-project --python 3.12 recon/run.py p00_env --python-version 2
 ```
 
 This launches `recon/probes/<probe_stem>.py` under `mpythonrun.exe`, waits for it to exit
@@ -233,7 +259,7 @@ ELF window; it never uses a primary-core fallback. It only inventories public ca
 signatures matching `browse`, `source`, `file`, `line`, or `module`; inventory never invokes one
 of those methods.
 
-The local MULTI 7.1.6 scripting implementation establishes that the apparent symbol helpers are
+The historical local MULTI 7.1.6 scripting implementation establishes that the apparent symbol helpers are
 not command-free source APIs: `CheckSymbol`, `GetSymbolAddress`, and `GetSymbolSize` issue
 debugger expressions, while `PrintFile` issues `dbprint f`. `script.pdf` documents `PrintFile`
 on page 254, but documents no public Source Files/file-list API. Consequently p03's documented,
