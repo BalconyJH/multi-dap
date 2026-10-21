@@ -261,6 +261,8 @@ func TestCloseClosesSubmissionGateAndWaitsForLoopExit(t *testing.T) {
 	a := newActor(t, b, nil)
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
+	releaseLoop := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseLoop)
 	if err := a.send(context.Background(), blockingCommand{entered: entered, release: release}); err != nil {
 		t.Fatal(err)
 	}
@@ -278,18 +280,19 @@ func TestCloseClosesSubmissionGateAndWaitsForLoopExit(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-		err := a.send(ctx, noReplyCommand{})
-		cancel()
-		if errors.Is(err, ErrClosed) {
+		a.submissions.Lock()
+		closing := a.closing
+		a.submissions.Unlock()
+		if closing {
 			break
-		}
-		if err != nil {
-			t.Fatalf("submission while Close begins = %v, want accepted or ErrClosed", err)
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("Close did not close the submission gate")
 		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := a.send(context.Background(), noReplyCommand{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("submission while Close waits for the actor loop = %v, want ErrClosed", err)
 	}
 
 	select {
@@ -297,7 +300,7 @@ func TestCloseClosesSubmissionGateAndWaitsForLoopExit(t *testing.T) {
 		t.Fatal("Close returned before the actor loop could exit")
 	default:
 	}
-	close(release)
+	releaseLoop()
 	select {
 	case <-closed:
 	case <-time.After(time.Second):
