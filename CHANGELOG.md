@@ -11,6 +11,8 @@ version is tagged.
 - MULTI component inventories accept comma-separated PID/core aliases without
   treating them as program bindings. Exact routed ELF identity checks remain
   mandatory, and ambiguous aliases fail closed.
+- Bridge inspection accepts Python 2 byte-string component names while
+  preserving strict route validation.
 
 ## [0.1.0] - 2026-09-08
 
