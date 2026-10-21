@@ -29,6 +29,9 @@ func TestValidateAcceptsAndNormalizesConfig(t *testing.T) {
 	if got.Multi.Installation != filepath.Join(root, "multi") {
 		t.Errorf("normalized installation = %q", got.Multi.Installation)
 	}
+	if got.Multi.PythonVersion != PythonVersion3 {
+		t.Errorf("default Python version = %d, want %d", got.Multi.PythonVersion, PythonVersion3)
+	}
 	if got.Connection.Project != filepath.Join(root, "project.ghsmc") {
 		t.Errorf("normalized project = %q", got.Connection.Project)
 	}
@@ -58,6 +61,11 @@ func TestValidateRejectsBoundaryViolations(t *testing.T) {
 			name:   "missing MULTI executable",
 			mutate: func(c *Config) { c.Multi.Executable = "multi/missing.exe" },
 			field:  "multi.executable",
+		},
+		{
+			name:   "unsupported Python version",
+			mutate: func(c *Config) { c.Multi.PythonVersion = 4 },
+			field:  "multi.python_version",
 		},
 		{
 			name:   "executable outside installation",
@@ -196,6 +204,19 @@ func TestValidateRejectsBoundaryViolations(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want problem for %q", err, test.field)
 			}
 		})
+	}
+}
+
+func TestValidateAcceptsExplicitPython2(t *testing.T) {
+	root := testFiles(t)
+	cfg := validConfig()
+	cfg.Multi.PythonVersion = PythonVersion2
+	got, err := cfg.Validate(root)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got.Multi.PythonVersion != PythonVersion2 {
+		t.Fatalf("Python version = %d, want %d", got.Multi.PythonVersion, PythonVersion2)
 	}
 }
 

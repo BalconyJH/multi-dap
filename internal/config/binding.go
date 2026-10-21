@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 )
 
-const bindingSchema = "multi-dap.config-binding/v1"
+const bindingSchema = "multi-dap.config-binding/v2"
 
 // BindingDigest returns an opaque, stable identity for a validated project
 // configuration. It intentionally represents runtime semantics rather than
@@ -15,11 +15,19 @@ const bindingSchema = "multi-dap.config-binding/v1"
 // confidentiality boundary; callers must continue to protect configuration
 // data and control-plane records with their existing access controls.
 func BindingDigest(validated Validated) (string, error) {
+	pythonVersion := validated.Multi.PythonVersion
+	if pythonVersion == 0 {
+		// Validated values normally come from Validate, but preserving the
+		// parser-facing zero-value default here keeps direct callers aligned
+		// with the effective launcher runtime.
+		pythonVersion = DefaultPythonVersion
+	}
 	envelope := bindingEnvelope{
 		Schema: bindingSchema,
 		Multi: bindingMulti{
-			Installation: validated.Multi.Installation,
-			Executable:   validated.Multi.Executable,
+			Installation:  validated.Multi.Installation,
+			Executable:    validated.Multi.Executable,
+			PythonVersion: pythonVersion,
 		},
 		Connection: bindingConnection{
 			Project:     validated.Connection.Project,
@@ -79,8 +87,9 @@ type bindingEnvelope struct {
 }
 
 type bindingMulti struct {
-	Installation string `json:"installation"`
-	Executable   string `json:"executable"`
+	Installation  string `json:"installation"`
+	Executable    string `json:"executable"`
+	PythonVersion int    `json:"python_version"`
 }
 
 type bindingConnection struct {

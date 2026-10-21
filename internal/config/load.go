@@ -55,6 +55,23 @@ func Load(path string) (Validated, error) {
 		return Validated{}, decodeError(configPath, err)
 	}
 
+	// The parser-facing field remains an int for callers that construct Config
+	// values directly. A parallel pointer decode records whether TOML actually
+	// supplied the optional key, allowing Validate to reject an explicit zero
+	// while retaining the omitted-field default.
+	var presence struct {
+		Multi struct {
+			PythonVersion *int `toml:"python_version"`
+		} `toml:"multi"`
+	}
+	presenceDecoder := toml.NewDecoder(bytes.NewReader(data))
+	if err := presenceDecoder.Decode(&presence); err != nil {
+		// The strict decode above already accepted the document. Keep this
+		// defensive error distinct in case the dependency changes behavior.
+		return Validated{}, decodeError(configPath, err)
+	}
+	raw.Multi.pythonVersionSet = presence.Multi.PythonVersion != nil
+
 	validated, err := raw.Validate(filepath.Dir(configPath))
 	if err != nil {
 		return Validated{}, fmt.Errorf("validate configuration %q: %w", configPath, err)

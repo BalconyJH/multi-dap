@@ -65,6 +65,7 @@ func TestBindingDigestChangesForEveryRuntimeField(t *testing.T) {
 	}{
 		{"multi installation", func(v *Validated) { v.Multi.Installation = `C:\MULTI-alt` }},
 		{"multi executable", func(v *Validated) { v.Multi.Executable = `C:\MULTI\bin\alt.exe` }},
+		{"multi Python version", func(v *Validated) { v.Multi.PythonVersion = PythonVersion2 }},
 		{"connection project", func(v *Validated) { v.Connection.Project = `C:\work\alt.cmp` }},
 		{"connection arguments", func(v *Validated) { v.Connection.Arguments = `usb=other` }},
 		{"connection preparation", func(v *Validated) { v.Connection.Preparation = ConnectionPreparationAlreadyPresentNoVerify }},
@@ -114,8 +115,9 @@ func mustBindingDigest(t *testing.T, validated Validated) string {
 func bindingTestValidated() Validated {
 	return Validated{
 		Multi: ValidatedMulti{
-			Installation: `C:\MULTI`,
-			Executable:   `C:\MULTI\bin\mpythonrun.exe`,
+			Installation:  `C:\MULTI`,
+			Executable:    `C:\MULTI\bin\mpythonrun.exe`,
+			PythonVersion: PythonVersion3,
 		},
 		Connection: ValidatedConnection{
 			Project:     `C:\work\target.cmp`,
