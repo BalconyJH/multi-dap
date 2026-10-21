@@ -1,4 +1,4 @@
-# Python 2.7. M0-2: can a resident socket loop coexist with MULTI calls?
+# Python 3/2. M0-2: can a resident socket loop coexist with MULTI calls?
 
 import json
 import os
@@ -46,29 +46,29 @@ def threaded_phase(session):
 
     def serve():
         conn = None
-        stream = None
         try:
             listener.settimeout(PHASE_TIMEOUT)
             conn, unused_addr = listener.accept()
             counts["accepts"] += 1
-            stream = conn.makefile("rb")
+            conn.settimeout(PHASE_TIMEOUT)
+            buffer_ = b""
             while not done.is_set():
-                line = stream.readline()
-                if not line:
+                chunk = conn.recv(4096)
+                if not chunk:
                     break
-                command = line.strip()
-                if command == "done":
-                    conn.sendall("done\n")
-                    done.set()
-                    break
-                counts["requests"] += 1
-                conn.sendall("pong\n")
+                buffer_ += chunk
+                while b"\n" in buffer_:
+                    line, buffer_ = buffer_.split(b"\n", 1)
+                    if line.strip() == b"done":
+                        conn.sendall(b"done\n")
+                        done.set()
+                        break
+                    counts["requests"] += 1
+                    conn.sendall(b"pong\n")
         except Exception as exc:
             errors.append(repr(exc))
             done.set()
         finally:
-            if stream is not None:
-                stream.close()
             if conn is not None:
                 conn.close()
 
@@ -99,7 +99,10 @@ def select_phase(session):
     publish_phase("select", listener.getsockname()[1])
     deadline = time.time() + PHASE_TIMEOUT
     conn = None
-    buffer_ = ""
+    # Socket recv() returns bytes on Python 3 (and str/bytes on Python 2).
+    # Keep the protocol buffer byte-oriented so both runtimes follow the same
+    # framing path and sendall() receives the type it requires.
+    buffer_ = b""
     done = False
     counts = {"accepts": 0, "requests": 0, "multi_calls": 0, "errors": []}
     statuses = {}
@@ -118,14 +121,14 @@ def select_phase(session):
                 if not chunk:
                     break
                 buffer_ += chunk
-                while "\n" in buffer_:
-                    line, buffer_ = buffer_.split("\n", 1)
-                    if line.strip() == "done":
-                        conn.sendall("done\n")
+                while b"\n" in buffer_:
+                    line, buffer_ = buffer_.split(b"\n", 1)
+                    if line.strip() == b"done":
+                        conn.sendall(b"done\n")
                         done = True
                         break
                     counts["requests"] += 1
-                    conn.sendall("pong\n")
+                    conn.sendall(b"pong\n")
             status = session.GetStatus()
             statuses[status] = statuses.get(status, 0) + 1
             counts["multi_calls"] += 1
