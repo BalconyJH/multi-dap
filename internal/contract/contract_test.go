@@ -145,6 +145,8 @@ func TestProjectConfigurationReferenceKeepsStrictBindingContract(t *testing.T) {
 		"rejects unknown TOML fields",
 		"multi.installation",
 		"multi.executable",
+		"multi.version",
+		"gversion.exe",
 		"connection.project",
 		"connection.arguments",
 		"connection.preparation",

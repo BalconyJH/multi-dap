@@ -7,8 +7,11 @@ target-specific Green Hills MULTI setup or qualify a hardware configuration.
 
 - Windows amd64 for the production runtime.
 - Go 1.26.6, matching `go.mod`.
-- A Green Hills MULTI installation whose `mpythonrun.exe` provides Python 2.7
-  and the MULTI Python modules.
+- Green Hills MULTI IDE 8.1.4 (or another supported installation) whose
+  `mpythonrun.exe` provides the MULTI Python modules. Python 3 is preferred;
+  Python 2.7 remains an explicit fallback through `[multi].python_version = 2`.
+- Compiler 2024.1.4 / Probe 6.6.8 may be installed separately for the target
+  toolchain. It is not the value of `multi.installation`.
 - A project file, target-server arguments, and one absolute ELF path per
   configured core.
 - A numeric loopback address for every configured endpoint.
@@ -33,6 +36,16 @@ placeholder with an absolute local value:
 Copy-Item .\multi-dap.example.toml C:\private\project.toml
 .\multi-dap.exe check --config C:\private\project.toml
 ```
+
+The example asks the loader to identify the MULTI release automatically from
+the installation's release metadata. Set `multi.version = "8.1.4"` when the
+project must reject another installation; the value is checked against that
+metadata. For a metadata-free installation, run
+`multi-dap multi-version --installation <multi-dir> --allow-executable-probe`
+to opt in to the standalone `gversion.exe` probe.
+If a legacy MULTI installation does not provide Python 3, set
+`python_version = 2` in its private copy and run `check` again. Both choices
+are included in the daemon's semantic configuration binding.
 
 Do not commit the completed configuration. It can contain private paths and
 target connection arguments. Service-router coordinates and a warm session's

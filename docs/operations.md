@@ -34,6 +34,7 @@ and native Cidr DAP Profile wiring.
 
 ```powershell
 multi-dap check --config C:\private\multi-dap-project.toml
+multi-dap multi-version --installation C:\path\to\multi_814
 multi-dap ensure --config C:\private\multi-dap-project.toml --acquisition cold
 multi-dap status --config C:\private\multi-dap-project.toml
 multi-dap diagnose --config C:\private\multi-dap-project.toml

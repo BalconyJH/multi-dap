@@ -1,6 +1,13 @@
 [multi]
-installation = "C:/path/to/multi_716d"
-executable = "C:/path/to/multi_716d/mpythonrun.exe"
+installation = "C:/path/to/multi_814"
+executable = "C:/path/to/multi_814/mpythonrun.exe"
+# Optional MULTI IDE release constraint. Omit this key, or use "auto", to
+# discover the release from install metadata (or an explicit gversion probe).
+# A concrete value (for example "8.1.4") must match the selected installation.
+version = "auto"
+# MULTI 8.1.4 includes Python 3.8.6 and is launched with it by default.
+# Set this to 2 only when using a legacy MULTI installation with Python 2.7.
+python_version = 3
 
 [connection]
 project = "C:/path/to/project.ghsmc"

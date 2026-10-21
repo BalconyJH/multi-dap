@@ -6,22 +6,38 @@ validated before MULTI starts or a listener is created. Use the same file for
 `ensure`, the supported CLion or VS Code proxy, and all config-based control
 commands.
 
+The current compatibility profile is MULTI IDE 8.1.4, paired with Compiler
+2024.1.4 / Probe 6.6.8. The compiler directory is a toolchain input to MULTI,
+not a value for `multi.installation`; `mpythonrun.exe` always comes from the
+MULTI directory.
+
 Start from `multi-dap.example.toml` at the repository root, or
 `examples/multi-dap.example.toml` in a release package. Keep the populated copy
 outside the repository because it can contain private paths, connection
 arguments, probe identity, and firmware information.
+Installation paths in the examples are placeholders, not required locations.
 
 ## Validate before use
 
 ```powershell
 multi-dap check --config "C:\private\multi-dap-project.toml"
+multi-dap multi-version --installation "C:\path\to\multi_814"
 ```
 
-`check` parses and validates the configuration without starting MULTI or
-connecting a target. The loader accepts only a regular file of at most 1 MiB,
-rejects unknown TOML fields, and reports all independent field-validation
-problems that it can collect in one pass. A symbolic link is not accepted as
-the configuration file.
+`check` parses and validates the configuration without starting MULTI,
+executing an installation tool, or connecting a target. The loader accepts only
+a regular file of at most 1 MiB, rejects unknown TOML fields, and reports all
+independent field-validation problems that it can collect in one pass. A
+symbolic link is not accepted as the configuration file.
+
+`multi-version` is an independent version probe. Use `--installation` to
+inspect a directory before a project TOML is complete, or `--config` to report
+the version already resolved by a configuration. Both forms read metadata by
+default. Add `--allow-executable-probe` (or `--probe-executable`) only when the
+selected installation's `gversion` utility may be executed to recover a missing
+release record; this is an explicit operator trust decision. It never starts
+MULTI or opens a target. `detect-multi-version` and `discover` are accepted
+aliases. Use `check` when the command must remain strictly static.
 
 ## Path rules
 
@@ -36,7 +52,10 @@ the directory containing the configuration file:
 
 They are cleaned, resolved to absolute paths, and checked on disk. Installation
 must be a directory; the other values must be regular files.
-`multi.executable` must be inside `multi.installation`.
+`multi.executable` must be inside `multi.installation`. An executable symlink is
+allowed for compatibility, but its resolved target must also remain inside the
+selected MULTI installation; links that escape the installation are rejected
+before any executable probe or daemon launch.
 
 Both sides of a `source_rewrites` rule must already be absolute. They are
 cleaned but are not required to exist during configuration validation.
@@ -48,6 +67,43 @@ Windows-style identity checks are case-insensitive.
 |---|---|---|
 | `installation` | Yes | Existing MULTI installation directory. |
 | `executable` | Yes | Existing `mpythonrun.exe`-compatible regular file inside `installation`. Runtime startup never searches `PATH`. |
+| `version` | No | Expected MULTI IDE release, such as `"8.1.4"`; omit or use `"auto"` to identify it from the installation. |
+| `python_version` | No | `3` (default) or `2`. Selects the embedded interpreter used by `mpythonrun`. |
+
+MULTI 8.1.4 has both Python 3.8.6 and Python 2.7.3 runtimes. The launcher
+explicitly sets `GHS_IDE_USE_PYTHON3=1` for `python_version = 3` and `0` for
+`python_version = 2`, so an inherited shell value cannot silently change the
+interpreter. Python 3 is the preferred path for current installations. Python
+2 is an explicit compatibility fallback for older MULTI releases or a bridge
+script that has not yet been migrated. An omitted field normalizes to `3`;
+there is no implicit retry under another interpreter after a failed start.
+
+The loader identifies the MULTI IDE release after structural path validation by
+reading `defaults/licensing/install_info.txt` and `install_summary.txt`; it does
+not execute anything from the installation. The standalone `multi-version`
+command can probe `gversion.exe` when explicitly requested with
+`--allow-executable-probe`. Neither path starts `multi.exe` or the GUI, and
+Windows PE `FileVersion` is not used
+because MULTI releases may report the generic value `8.0` there. A concrete
+`version` is a constraint, not an override: a mismatch or a damaged MULTI
+metadata marker fails `check` and startup. The special value `"auto"` makes
+successful detection mandatory. For legacy stripped/test installations with no
+release marker, an omitted key preserves compatibility and leaves the reported
+version unknown.
+
+Version comparison is exact for release qualifiers. The one compatibility
+exception is the historical MULTI `7.1.6d` installation: its release metadata
+retains the `d` suffix while `gversion` reports `7.1.6`, and those two forms are
+treated as the same observed release.
+
+`check`/`doctor` include `multi_version` and `multi_version_source` when a
+release was identified. A live `status` response includes the sanitized
+`multi_version` as well. The observed version is part of the semantic binding,
+so changing installations or releases cannot reuse an old daemon record.
+
+For the local installation above, the two read-only environment checks reported
+Python 3.8.6 and Python 2.7.3 respectively, and both exposed the required
+`ghs_debugger` / `ghs_debugger_api` modules. These checks do not open a target.
 
 ## `[connection]`
 
@@ -170,7 +226,10 @@ DAP, sanitized status output, ordinary logs, and terminal diagnostics. It is
 an integrity selector, not a secret or proof of a hardware serial number.
 
 The binding includes ordered core and source-rewrite entries and every
-normalized field described above. It intentionally excludes:
+normalized field described above, including `multi.version` and
+`multi.python_version`. The configuration-binding schema is
+`multi-dap.config-binding/v3` after adding the MULTI release selector. It
+intentionally excludes:
 
 - the TOML file path, comments, formatting, and original bytes;
 - the contents of referenced project, ELF, and source files;
