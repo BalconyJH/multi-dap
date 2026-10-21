@@ -6,6 +6,7 @@ the probe's result from its JSON evidence file instead.
 """
 
 import argparse
+import io
 import json
 import os
 import subprocess
@@ -14,6 +15,9 @@ import time
 
 RECON = os.path.dirname(os.path.abspath(__file__))
 CREATE_NEW_CONSOLE = 0x00000010
+PYTHON_VERSION_2 = 2
+PYTHON_VERSION_3 = 3
+DEFAULT_PYTHON_VERSION = PYTHON_VERSION_3
 WARM_ONLY_PROBES = ("p00e_warm_bind",
                     "p02_socket",
                     "p03_m2_source_known",
@@ -31,6 +35,61 @@ WARM_ONLY_PROBES = ("p00e_warm_bind",
                     "p15_warm_registry_health")
 
 
+def wait_for_process(proc, timeout, poll_interval=0.05):
+    """Wait for a child on both Python 2.7 and Python 3.
+
+    ``Popen.wait(timeout=...)`` and ``subprocess.TimeoutExpired`` were added
+    after the Python 2.7 runtime shipped with older MULTI installations.  A
+    small poll loop keeps the explicit Python 2 fallback usable without
+    changing the child process or redirecting its console handles.
+    """
+    deadline = time.time() + max(0.0, float(timeout))
+    while True:
+        return_code = proc.poll()
+        if return_code is not None:
+            return return_code, False
+        if time.time() >= deadline:
+            return None, True
+        time.sleep(min(poll_interval, max(0.0, deadline - time.time())))
+
+
+def kill_timed_out_process(proc, timeout=5.0):
+    """Kill a timed-out child without an unbounded cleanup wait."""
+    try:
+        proc.kill()
+    except OSError:
+        return_code = proc.poll()
+        if return_code is None:
+            raise
+        return return_code
+    return_code, timed_out = wait_for_process(proc, timeout)
+    if timed_out:
+        raise RuntimeError("probe did not exit after kill; it may still be running")
+    return return_code
+
+
+def resolve_python_version(config, override=None):
+    """Resolve the embedded MULTI interpreter without an implicit fallback."""
+    raw = config.get("python_version", DEFAULT_PYTHON_VERSION) if override is None else override
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        raise ValueError("python_version must be 2 or 3")
+    if raw not in (PYTHON_VERSION_2, PYTHON_VERSION_3):
+        raise ValueError("python_version must be 2 or 3")
+    return raw
+
+
+def embedded_python_environment(version, base=None):
+    """Pin mpythonrun's interpreter selector while preserving other variables."""
+    if version not in (PYTHON_VERSION_2, PYTHON_VERSION_3):
+        raise ValueError("python_version must be 2 or 3")
+    environment = dict(os.environ if base is None else base)
+    for name in list(environment):
+        if name.lower() == "ghs_ide_use_python3":
+            del environment[name]
+    environment["GHS_IDE_USE_PYTHON3"] = "1" if version == PYTHON_VERSION_3 else "0"
+    return environment
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("probe", help="probe stem, e.g. p06_poll")
@@ -45,6 +104,13 @@ def main():
         "--cold",
         action="store_true",
         help="do not join the configured live service router",
+    )
+    ap.add_argument(
+        "--python-version",
+        type=int,
+        choices=(PYTHON_VERSION_2, PYTHON_VERSION_3),
+        default=None,
+        help="embedded MULTI Python runtime (default: config value or 3)",
     )
     args, rest = ap.parse_known_args()
     if args.cold and args.service_router_port is not None:
@@ -64,8 +130,12 @@ def main():
     cfg_path = os.path.join(RECON, "config.local.json")
     if not os.path.exists(cfg_path):
         sys.exit("missing %s - copy config.example.json and fill in real values" % cfg_path)
-    with open(cfg_path, encoding="utf-8") as fh:
+    with io.open(cfg_path, "r", encoding="utf-8") as fh:
         cfg = json.load(fh)
+    try:
+        python_version = resolve_python_version(cfg, args.python_version)
+    except ValueError as exc:
+        ap.error(str(exc))
 
     script = os.path.join(RECON, "probes", args.probe + ".py")
     if not os.path.exists(script):
@@ -100,18 +170,25 @@ def main():
         cmd += ["-args"] + probe_args
 
     started = time.time()
-    proc = subprocess.Popen(cmd, cwd=RECON, creationflags=CREATE_NEW_CONSOLE)
-    try:
-        proc.wait(timeout=args.timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5.0)
-        print("TIMEOUT after %.1fs - probe killed" % (time.time() - started))
+    proc = subprocess.Popen(
+        cmd,
+        cwd=RECON,
+        creationflags=CREATE_NEW_CONSOLE,
+        env=embedded_python_environment(python_version),
+    )
+    _, timed_out = wait_for_process(proc, args.timeout)
+    if timed_out:
+        try:
+            kill_timed_out_process(proc)
+        except (OSError, RuntimeError) as exc:
+            sys.exit("TIMEOUT after %.1fs - cleanup failed: %s" %
+                     (time.time() - started, exc))
+        print("TIMEOUT after %.1fs - probe exited" % (time.time() - started))
 
     if not os.path.exists(out):
         sys.exit("probe produced no evidence file: %s" % out)
 
-    with open(out, encoding="utf-8") as fh:
+    with io.open(out, "r", encoding="utf-8") as fh:
         data = json.load(fh)
     print("probe   :", data.get("probe"))
     print("seconds :", round(data.get("total_seconds", 0.0), 3))
