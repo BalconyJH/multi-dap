@@ -102,9 +102,11 @@ jobs:
           fi
           version="${RELEASE_TAG#v}"
           archive_name="multi-dap-${version}-windows-amd64.zip"
-          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf 'commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
-          printf 'archive_name=%s\n' "$archive_name" >> "$GITHUB_OUTPUT"
+          {
+            printf 'version=%s\n' "$version"
+            printf 'commit=%s\n' "$release_commit"
+            printf 'archive_name=%s\n' "$archive_name"
+          } >> "$GITHUB_OUTPUT"
       - name: Download exactly the five published release assets
         shell: bash
         env:
