@@ -17,11 +17,53 @@ const testConfigDigest = "0123456789abcdef0123456789abcdef0123456789abcdef012345
 
 const otherTestConfigDigest = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 
+func TestDecodeStatusKeepsBreakpointCountsAtomicWithOptionalVersion(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		counts []string
+		valid  bool
+	}{
+		{"legacy", nil, true},
+		{"full", []string{"dap_owned_breakpoints", "pending_breakpoints", "orphaned_breakpoints"}, true},
+		{"partial one", []string{"dap_owned_breakpoints"}, false},
+		{"partial two", []string{"dap_owned_breakpoints", "pending_breakpoints"}, false},
+	} {
+		for _, version := range []string{"", "8.1.4"} {
+			t.Run(test.name+"/"+version, func(t *testing.T) {
+				status := map[string]any{
+					"probe_id": "probe-1", "pid": 1, "dap_address": "127.0.0.1:43123",
+					"target_state": "stopped", "execution_epoch": 0, "stop_epoch": 0,
+				}
+				if version != "" {
+					status["multi_version"] = version
+				}
+				for _, field := range test.counts {
+					status[field] = 0
+				}
+				line, err := json.Marshal(map[string]any{
+					"version": ProtocolVersion, "ok": true, "status": status,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := decodeResponse(line)
+				if test.valid {
+					if err != nil || result.Status == nil || result.Status.MultiVersion != version {
+						t.Fatalf("decodeResponse() = (%+v, %v), want version %q", result, err, version)
+					}
+				} else if !errors.Is(err, ErrMalformed) {
+					t.Fatalf("decodeResponse() error = %v, want malformed partial counts", err)
+				}
+			})
+		}
+	}
+}
+
 func TestServerStatusRequiresTokenAndUsesLoopback(t *testing.T) {
 	server, err := NewServer(ServerOptions{
 		ProbeID: "probe-1", ConfigDigest: testConfigDigest, DAPAddress: "127.0.0.1:43123",
 		Status: func(context.Context) (Status, error) {
-			return Status{ProbeID: "probe-1", PID: os.Getpid(), DAPAddress: "127.0.0.1:43123", TargetState: "stopped", ExecutionEpoch: 4, StopEpoch: 9, DAPOwned: 5, Pending: 2, Orphaned: 1}, nil
+			return Status{ProbeID: "probe-1", PID: os.Getpid(), DAPAddress: "127.0.0.1:43123", MultiVersion: "8.1.4", TargetState: "stopped", ExecutionEpoch: 4, StopEpoch: 9, DAPOwned: 5, Pending: 2, Orphaned: 1}, nil
 		},
 		Shutdown: func() {},
 	})
@@ -42,7 +84,7 @@ func TestServerStatusRequiresTokenAndUsesLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status.TargetState != "stopped" || status.StopEpoch != 9 || status.DAPOwned != 5 || status.Pending != 2 || status.Orphaned != 1 {
+	if status.MultiVersion != "8.1.4" || status.TargetState != "stopped" || status.StopEpoch != 9 || status.DAPOwned != 5 || status.Pending != 2 || status.Orphaned != 1 {
 		t.Fatalf("status = %+v", status)
 	}
 

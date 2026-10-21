@@ -51,9 +51,13 @@ type errorReply struct {
 // Status is the observation returned by a live daemon. It deliberately
 // contains no project connection arguments or control credential.
 type Status struct {
-	ProbeID        string `json:"probe_id"`
-	PID            int    `json:"pid"`
-	DAPAddress     string `json:"dap_address"`
+	ProbeID    string `json:"probe_id"`
+	PID        int    `json:"pid"`
+	DAPAddress string `json:"dap_address"`
+	// MultiVersion is the observed MULTI IDE release. It is optional for
+	// compatibility with daemons created from metadata-free test/legacy
+	// installations and contains no path or command-line secrets.
+	MultiVersion   string `json:"multi_version,omitempty"`
 	TargetState    string `json:"target_state"`
 	ExecutionEpoch uint64 `json:"execution_epoch"`
 	StopEpoch      uint64 `json:"stop_epoch"`

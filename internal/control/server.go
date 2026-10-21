@@ -349,10 +349,14 @@ func decodeResponse(line []byte) (response, error) {
 	}
 	if raw, ok := fields["status"]; ok {
 		statusFields, err := strictObject(raw, map[string]struct{}{
-			"probe_id": {}, "pid": {}, "dap_address": {}, "target_state": {}, "execution_epoch": {}, "stop_epoch": {},
+			"probe_id": {}, "pid": {}, "dap_address": {}, "multi_version": {}, "target_state": {}, "execution_epoch": {}, "stop_epoch": {},
 			"dap_owned_breakpoints": {}, "pending_breakpoints": {}, "orphaned_breakpoints": {},
 		})
-		if err != nil || (len(statusFields) != 6 && len(statusFields) != 9) || result.Status == nil || result.Status.ProbeID == "" || result.Status.PID <= 0 || result.Status.DAPAddress == "" || result.Status.TargetState == "" || result.Status.DAPOwned < 0 || result.Status.Pending < 0 || result.Status.Orphaned < 0 {
+		statusFieldCount := len(statusFields)
+		if _, present := statusFields["multi_version"]; present {
+			statusFieldCount--
+		}
+		if err != nil || (statusFieldCount != 6 && statusFieldCount != 9) || result.Status == nil || result.Status.ProbeID == "" || result.Status.PID <= 0 || result.Status.DAPAddress == "" || result.Status.TargetState == "" || result.Status.DAPOwned < 0 || result.Status.Pending < 0 || result.Status.Orphaned < 0 {
 			return response{}, fmt.Errorf("%w: invalid status", ErrMalformed)
 		}
 	}
