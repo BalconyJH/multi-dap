@@ -24,10 +24,10 @@ Writing its standard output through `WriteConsole`, it fails with a modal Window
 stdout is a pipe or a file. The capture records only the failure class; handle values, byte
 counts, and platform error codes are intentionally omitted.
 
-The daemon must therefore launch the bridge with `CREATE_NEW_CONSOLE` and never capture its
-standard streams. This is an argument *for* the §7.1 decision that `bridge.py` owns its own
-socket: stdout was never going to be a usable channel. Every probe in this project writes JSON
-to a file for the same reason.
+The daemon must therefore launch the bridge with `CREATE_NEW_CONSOLE`, repair an invalid parent
+console handle for direct `serve` launches, and never capture its standard streams. This is an
+argument *for* the §7.1 decision that `bridge.py` owns its own socket: stdout was never going to
+be a usable channel. Every probe in this project writes JSON to a file for the same reason.
 
 ### 0.2 A bare `help` wedges the interpreter permanently
 

@@ -22,8 +22,7 @@ var (
 const winErrorAccessDenied = syscall.Errno(5)
 
 func prepareBridgeConsole() error {
-	var mode uint32
-	if result, _, _ := getConsoleMode.Call(os.Stdout.Fd(), uintptr(unsafe.Pointer(&mode))); result != 0 {
+	if hasConsoleHandle(os.Stdout) && hasConsoleHandle(os.Stderr) {
 		return nil
 	}
 	if result, _, callErr := allocConsole.Call(); result == 0 && !errors.Is(callErr, winErrorAccessDenied) {
@@ -39,4 +38,13 @@ func prepareBridgeConsole() error {
 		_, _, _ = showWindow.Call(window, 0)
 	}
 	return nil
+}
+
+func hasConsoleHandle(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	var mode uint32
+	result, _, _ := getConsoleMode.Call(file.Fd(), uintptr(unsafe.Pointer(&mode)))
+	return result != 0
 }

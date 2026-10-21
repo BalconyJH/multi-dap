@@ -13,6 +13,8 @@ version is tagged.
   mandatory, and ambiguous aliases fail closed.
 - Bridge inspection accepts Python 2 byte-string component names while
   preserving strict route validation.
+- Direct Windows `serve` repairs invalid stdout and stderr console handles
+  before starting the MULTI bridge.
 
 ## [0.1.0] - 2026-09-08
 
