@@ -6,6 +6,21 @@ version is tagged.
 
 ## Unreleased
 
+### Added
+
+- MULTI IDE 8.1.4 / Compiler 2024.1.4 compatibility documentation and a
+  configuration-bound embedded Python runtime selector. Python 3 is now the
+  preferred `mpythonrun` runtime; Python 2.7 remains an explicit fallback.
+- Metadata-only MULTI IDE release detection, optional `multi.version`
+  constraints, and configuration-bound observed versions. Executing the
+  installation's `gversion.exe` requires an explicit executable-probe opt-in.
+- Windows launcher environment pinning and no-target smoke evidence for both
+  MULTI embedded interpreters.
+- Dual-runtime reconnaissance helpers with byte-oriented socket framing and
+  explicit embedded-interpreter selection.
+- Repository-local DAP and native MULTI socket workflows with operation-specific
+  authorization, bounded response waits, and private evidence handling.
+
 ### Fixed
 
 - MULTI component inventories accept comma-separated PID/core aliases without
@@ -15,6 +30,10 @@ version is tagged.
   preserving strict route validation.
 - Direct Windows `serve` repairs invalid stdout and stderr console handles
   before starting the MULTI bridge.
+- Executable containment checks resolve ancestor directory links before
+  accepting a configured path inside the MULTI installation.
+- Reconnaissance timeout cleanup remains bounded, and the socket client writes
+  UTF-8 JSON under both supported Python runtimes.
 
 ## [0.1.0] - 2026-09-08
 
