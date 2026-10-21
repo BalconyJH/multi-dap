@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use MULTI DAP"
+  short_description: "Configure and diagnose MULTI DAP debug sessions"
+  default_prompt: "Use $use-multi-dap to configure the adapter, attach to the intended MULTI session, and verify supported debugging operations."
