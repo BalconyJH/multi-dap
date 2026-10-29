@@ -111,7 +111,7 @@ func (d *Driver) CurrentLocals(ctx context.Context) ([]NamedValue, error) {
 // the single verified "print <expr>" command.
 //
 // MULTI-NOSTRUCT: M0-4 established that scalar evaluation is available only
-// through print text; its output is pinned by testdata/value.txt.
+// through print text; its output is pinned by testdata/value*.txt.
 func (d *Driver) Evaluate(ctx context.Context, expression string) (NamedValue, error) {
 	if err := validateExpression(expression); err != nil {
 		return NamedValue{}, err
@@ -123,7 +123,7 @@ func (d *Driver) Evaluate(ctx context.Context, expression string) (NamedValue, e
 	if result.RawLossy {
 		return NamedValue{}, protocolError("evaluate", errors.New("value text is lossy"))
 	}
-	value, err := ParseValue(result.Raw)
+	value, err := parseEvaluationValue(result.Raw, expression)
 	if err != nil {
 		return NamedValue{}, fmt.Errorf("multi: evaluate text: %w", err)
 	}

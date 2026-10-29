@@ -214,11 +214,15 @@ func (r *InspectionRunner) Evaluate(ctx context.Context, client *bridge.Client, 
 	if err != nil {
 		return inspection.RawValue{}, err
 	}
+	return r.evaluate(ctx, driver, core, expression)
+}
+
+func (r *InspectionRunner) evaluate(ctx context.Context, driver *Driver, core inspection.CoreID, expression inspection.Expression) (inspection.RawValue, error) {
 	result, err := routedInspectionCommand(ctx, r.topology, driver, core, "print "+expression.Text())
 	if err != nil {
 		return inspection.RawValue{}, fmt.Errorf("multi: routed evaluate: %w", err)
 	}
-	value, valueErr := ParseValue(result.Raw)
+	value, valueErr := parseEvaluationValue(result.Raw, expression.Text())
 	if valueErr == nil {
 		return rawValue(value), nil
 	}
