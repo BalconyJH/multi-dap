@@ -68,6 +68,9 @@ type Options struct {
 	// M5 is the read-only Memory View and Disassembly backend. Like the
 	// inspection runner, it receives only executor-owned bridge clients.
 	M5 M5Runner
+	// Trace owns an independent native helper. Its calls are admitted by the
+	// actor but never share the MBP executor's blocking worker or poison state.
+	Trace TraceService
 
 	// ConsoleEnabled permits bounded incremental MULTI console collection for
 	// attached frontends. It defaults to false so embedders which do not expose
@@ -143,8 +146,9 @@ type Actor struct {
 	// channel deliberately remains open: closing it would race callers and
 	// turn a rejected submission into a panic. Instead Close closes this gate
 	// before it places its close command after every already admitted command.
-	submissions sync.Mutex
-	closing     bool
+	submissions  sync.Mutex
+	closing      bool
+	traceEnabled bool
 }
 
 // Operation identifies the actor work category that made the session
@@ -163,6 +167,7 @@ const (
 	OperationInspection
 	OperationRollbackClose
 	OperationConsole
+	OperationTrace
 )
 
 func (operation Operation) String() string {
@@ -185,6 +190,8 @@ func (operation Operation) String() string {
 		return "rollback-close"
 	case OperationConsole:
 		return "console"
+	case OperationTrace:
+		return "trace"
 	default:
 		return "unknown"
 	}
@@ -219,19 +226,22 @@ type reply[T any] struct {
 }
 
 type runtime struct {
-	opts        Options
-	executor    *bridge.Executor
-	reducer     *session.Reducer
-	handles     *handle.Store
-	breakpoints *breakpoint.Store
-	stopper     *stop.Arbiter
-	commands    chan command
-	done        chan struct{}
-	faults      chan<- Fault
-	complete    chan completion
-	pending     []rpcWork
-	inflight    *inflight
-	nextToken   uint64
+	opts              Options
+	executor          *bridge.Executor
+	reducer           *session.Reducer
+	handles           *handle.Store
+	breakpoints       *breakpoint.Store
+	stopper           *stop.Arbiter
+	commands          chan command
+	done              chan struct{}
+	faults            chan<- Fault
+	complete          chan completion
+	pending           []rpcWork
+	inflight          *inflight
+	nextToken         uint64
+	controlGeneration uint64
+	traceBlocked      bool
+	traceBlockReason  string
 
 	opened  bool
 	opening bool
@@ -284,6 +294,7 @@ const (
 	opInspection
 	opRollbackClose
 	opConsole
+	opTrace
 )
 
 func (kind opKind) operation() Operation {
@@ -306,6 +317,8 @@ func (kind opKind) operation() Operation {
 		return OperationRollbackClose
 	case opConsole:
 		return OperationConsole
+	case opTrace:
+		return OperationTrace
 	default:
 		return OperationUnknown
 	}
@@ -317,11 +330,16 @@ const (
 	deadlineRPC deadlinePolicy = iota
 	deadlineBootstrap
 	deadlineRollback
+	deadlineTraceBootstrap
 )
 
 type rpcWork struct {
 	kind opKind
 	run  bridge.Operation
+	// isolated runs outside the MBP worker. Only native trace work uses this
+	// path, so a stuck helper cannot strand later debugger bridge traffic.
+	isolated      func(context.Context) (any, error)
+	isolatedOwner session.ControllerID
 	// validate runs only on the actor goroutine immediately before the work is
 	// submitted to the bridge. It must not read reducer state from run: run is
 	// dispatched on a worker goroutine and therefore cannot safely decide
@@ -334,11 +352,12 @@ type rpcWork struct {
 }
 
 type inflight struct {
-	token      uint64
-	work       rpcWork
-	submitted  bool
-	generation bridge.BridgeGeneration
-	operation  bridge.OperationID
+	token          uint64
+	work           rpcWork
+	submitted      bool
+	generation     bridge.BridgeGeneration
+	operation      bridge.OperationID
+	cancelIsolated context.CancelFunc
 }
 
 type completion struct {
@@ -387,7 +406,10 @@ func New(options Options) (*Actor, error) {
 		options.Breakpoints = breakpoint.NewStore()
 	}
 
-	a := &Actor{commands: make(chan command, 64), done: make(chan struct{}), faults: make(chan Fault, 1)}
+	a := &Actor{
+		commands: make(chan command, 64), done: make(chan struct{}), faults: make(chan Fault, 1),
+		traceEnabled: options.Trace != nil && options.Trace.Enabled(),
+	}
 	r := &runtime{
 		opts: options, executor: options.Executor, reducer: session.New(options.Session),
 		handles: options.Handles, breakpoints: options.Breakpoints, commands: a.commands, done: a.done, faults: a.faults,
@@ -713,6 +735,15 @@ func (r *runtime) startNext() {
 		}
 		r.nextToken++
 		in := &inflight{token: r.nextToken, work: work}
+		if work.isolated != nil {
+			parent := work.parent
+			if parent == nil {
+				parent = context.Background()
+			}
+			work.parent, in.cancelIsolated = context.WithCancel(parent)
+			in.work = work
+			in.generation = r.executor.Generation()
+		}
 		r.inflight = in
 		go r.dispatch(in.token, work)
 	}
@@ -732,6 +763,8 @@ func (r *runtime) dispatch(token uint64, work rpcWork) {
 		ctx, cancel = context.WithCancel(parent)
 	case deadlineRollback:
 		ctx, cancel = context.WithTimeout(context.Background(), r.opts.RPCDeadline)
+	case deadlineTraceBootstrap:
+		ctx, cancel = context.WithTimeout(parent, r.opts.BootstrapDeadline)
 	default:
 		ctx, cancel = context.WithTimeout(parent, r.opts.RPCDeadline)
 	}
@@ -740,6 +773,10 @@ func (r *runtime) dispatch(token uint64, work rpcWork) {
 	generation := executor.Generation()
 	if work.expectedGeneration != 0 && generation != work.expectedGeneration {
 		r.deliver(completion{token: token, generation: generation, err: ErrBridgeStaleCompletion})
+		return
+	}
+	if work.isolated != nil {
+		r.dispatchIsolated(token, work, ctx, generation)
 		return
 	}
 	operation, completed, err := executor.Submit(ctx, work.run)
@@ -774,6 +811,18 @@ func (r *runtime) deliver(c completion) {
 func (r *runtime) completeWork(c completion) {
 	in := r.inflight
 	if in == nil || in.token != c.token {
+		return
+	}
+	if in.work.isolated != nil {
+		r.inflight = nil
+		in.cancelIsolated()
+		if c.accepted || c.generation == 0 || c.generation != in.generation ||
+			r.executor.Generation() != in.generation ||
+			(in.work.expectedGeneration != 0 && c.generation != in.work.expectedGeneration) {
+			in.work.done(r, nil, ErrBridgeStaleCompletion)
+			return
+		}
+		in.work.done(r, c.result, c.err)
 		return
 	}
 	if c.accepted {
@@ -1262,6 +1311,7 @@ func (r *runtime) failClosed(operation Operation, cause error) {
 		return
 	}
 	r.faulted = true
+	r.invalidateTraceOwner("", "actor_faulted")
 	fault := Fault{Operation: operation, cause: cause}
 	select {
 	case r.faults <- fault:
@@ -1392,7 +1442,12 @@ func (c acquireCommand) apply(r *runtime) {
 		respond(c.reply, struct{}{}, ErrReconciliationNeeded)
 		return
 	}
-	respond(c.reply, struct{}{}, r.reducer.AcquireControl(c.owner))
+	previous := r.reducer.Snapshot().LeaseOwner
+	err := r.reducer.AcquireControl(c.owner)
+	if err == nil && previous != c.owner {
+		r.controlGeneration++
+	}
+	respond(c.reply, struct{}{}, err)
 }
 
 type releaseCommand struct {
@@ -1401,6 +1456,10 @@ type releaseCommand struct {
 }
 
 func (c releaseCommand) apply(r *runtime) {
+	if c.owner != "" && r.reducer.Snapshot().LeaseOwner == c.owner {
+		r.invalidateTraceOwner(c.owner, "control_released")
+		r.controlGeneration++
+	}
 	respond(c.reply, struct{}{}, r.reducer.ReleaseControl(c.owner))
 }
 
@@ -1558,6 +1617,7 @@ func (c allocateHandleCommand) apply(r *runtime) {
 type closeCommand struct{ reply chan reply[struct{}] }
 
 func (c closeCommand) apply(r *runtime) {
+	r.invalidateTraceOwner("", "daemon_closed")
 	for id, sub := range r.subs {
 		close(sub.events)
 		delete(r.subs, id)
@@ -1645,6 +1705,9 @@ func (r *runtime) detach(id uint64) {
 	}
 }
 func (r *runtime) detachOwner(owner session.ControllerID) {
+	if owner != "" {
+		r.invalidateTraceOwner(owner, "frontend_detached")
+	}
 	for id, sub := range r.subs {
 		if sub.owner == owner {
 			r.detach(id)
@@ -1657,6 +1720,9 @@ func (r *runtime) detachOwner(owner session.ControllerID) {
 	_, cleanupRequested := r.breakpoints.RequestCleanupSignal(breakpoint.Owner(owner))
 	if r.reducer.Snapshot().LeaseOwner == owner {
 		_ = r.reducer.ReleaseControl(owner)
+		if owner != "" {
+			r.controlGeneration++
+		}
 	}
 	if cleanupRequested {
 		r.maybeScheduleBreakpointCleanup(r.reducer.Snapshot(), true)
