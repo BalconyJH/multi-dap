@@ -1,0 +1,23 @@
+{
+  "schema": "multi-dap.profile-mapping.v1",
+  "multi_version": "8.1.4",
+  "export_surface": "profile_csvexport",
+  "view": "functions",
+  "mode": "history_performance",
+  "provenance": "synthetic_fixture",
+  "filter_scope": "unknown",
+  "name_style": "short",
+  "list_layout": "flat",
+  "headers": ["entity", "own_ns", "calls", "covered_pct", "coverage"],
+  "allow_utf8_bom": false,
+  "identity": {"label": "entity", "function": "entity"},
+  "line_basis": "unavailable",
+  "metrics": [
+    {"name": "self_time", "column": "own_ns", "semantic": "time", "unit": "ns", "attribution": "self"},
+    {"name": "calls", "column": "calls", "semantic": "observed_calls", "unit": "count", "attribution": "vendor_unspecified"},
+    {"name": "covered", "column": "covered_pct", "semantic": "coverage_percent", "unit": "percent", "attribution": "vendor_unspecified", "denominator": "entity_instructions"},
+    {"name": "coverage", "column": "coverage", "semantic": "coverage_state", "unit": "state", "attribution": "vendor_unspecified", "token_map": {"yes": "covered", "some": "partial", "no": "uncovered"}}
+  ],
+  "missing_tokens": ["NA"],
+  "missing_policy": "preserve_missing"
+}
