@@ -1,0 +1,4 @@
+entity,own_ns,calls,covered_pct,coverage
+same_name,1.250,18446744073709551616,100,yes
+same_name,2.5,18446744073709551617,75.25,some
+missing_time,NA,0,0,no
