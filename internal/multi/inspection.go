@@ -274,6 +274,22 @@ func ParseValue(output string) (value NamedValue, err error) {
 	return values[0], nil
 }
 
+var bareEvaluationInteger = regexp.MustCompile(`^-?[0-9]+(?:\r?\n)?$`)
+
+// parseEvaluationValue adds only the observed bare decimal print result to the
+// named-value grammar. The validated caller expression supplies its display
+// name; digits remain text, with no numeric, type, or address inference.
+func parseEvaluationValue(output, expression string) (NamedValue, error) {
+	if _, err := inspectionOutputLines("value", output); err != nil {
+		return NamedValue{}, inspectionFormatError("value", err)
+	}
+	if bareEvaluationInteger.MatchString(output) {
+		display := strings.TrimSuffix(strings.TrimSuffix(output, "\n"), "\r")
+		return NamedValue{Name: expression, Display: display, State: ValueAvailable}, nil
+	}
+	return ParseValue(output)
+}
+
 // Aggregate is one print result whose type header and braces prove that MULTI
 // expanded precisely one aggregate level. It deliberately retains only the
 // display text and safe child-path metadata; neither is a MULTI handle.
