@@ -255,3 +255,42 @@ func duplicateSelectedProcessTable() string {
 		">>   0 0x1 N/A        Stopped       011111101 X:\\one.elf\n" +
 		">>   1 0x2 N/A        Running       011111101 X:\\one.elf\n"
 }
+
+func TestResolveTopologyNameFirstUsesFullRoutedProgram(t *testing.T) {
+	// The same unescaped tail can describe metadata or a literal filename.
+	// Neither the name nor the apparent PID/core is an identity assertion.
+	const plain = `X:\fixture\release.elf`
+	const tail = `X:\fixture\release.elf, debugger.pid.7, debugger.core.0, debugger.core.fixture-server.exe.0`
+	tests := []struct {
+		name, configured, selected string
+		wantError                  bool
+	}{
+		{"real name-first shape", plain, plain, false},
+		{"matching name cannot hide different P", plain, `X:\fixture\other.elf`, true},
+		{"literal alias-looking filename", tail, tail, false},
+		{"literal filename cannot bind guessed prefix", tail, plain, true},
+		{"prefix cannot bind literal filename", plain, tail, true},
+		{"literal comma filename", `X:\fixture\one,two.elf`, `X:\fixture\one,two.elf`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			driver, caller := newTestDriver(t,
+				fakeCall{method: "cores", params: map[string]string{}, result: commandText("components", golden(t, "components_name_first.txt"))},
+				fakeCall{method: "run_commands", params: command("route component.15 P"), result: commandText("raw", processTable(999, 1, StatusStopped, tt.selected))},
+			)
+			topology, err := ResolveTopology(context.Background(), driver, []CoreSpec{{ID: 42, ELF: tt.configured}})
+			if (err != nil) != tt.wantError {
+				t.Fatalf("ResolveTopology() error = %v, want error %v", err, tt.wantError)
+			}
+			if tt.wantError && !strings.Contains(err.Error(), "selected an unconfigured program") {
+				t.Fatalf("failure did not reach routed P identity check: %v", err)
+			}
+			if !tt.wantError && topology.routes[42].component != "component.15" {
+				t.Fatalf("routes = %#v", topology.routes)
+			}
+			if len(caller.calls) != 0 {
+				t.Fatalf("unconsumed calls: %#v", caller.calls)
+			}
+		})
+	}
+}

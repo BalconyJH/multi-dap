@@ -31,6 +31,10 @@ type Component struct {
 	Role      ComponentRole
 	ProcessID uint64
 	Name      string
+	// NameAmbiguous marks valid metadata-like suffixes in the preserved display
+	// tail. Commas are unescaped: Name is not a parsed ELF path, and suffixes
+	// after the name never establish ProcessID or routing.
+	NameAmbiguous bool
 }
 
 // ParseComponents parses components command output captured from MULTI 7.1.6d
@@ -68,6 +72,7 @@ func parseComponentAliases(component *Component, descriptor string) error {
 		return nil
 	}
 	aliases := strings.Split(descriptor, ",")
+	seenPID, seenName := false, false
 	for index, rawAlias := range aliases {
 		alias := strings.TrimSpace(rawAlias)
 		switch {
@@ -78,38 +83,68 @@ func parseComponentAliases(component *Component, descriptor string) error {
 			if !ok || processID == 0 {
 				return fmt.Errorf("parse components: invalid process alias")
 			}
-			if component.ProcessID != 0 {
+			if seenPID {
 				return fmt.Errorf("parse components: duplicate process alias")
 			}
-			component.Role = ComponentPIDAlias
-			component.ProcessID = processID
-		case strings.HasPrefix(alias, "debugger.name."), strings.HasPrefix(alias, "debugserver.name."):
-			// Preserve literal commas in names; only known alias prefixes are ambiguous.
-			for _, remainder := range aliases[index+1:] {
-				remainder = strings.TrimSpace(remainder)
-				if strings.HasPrefix(remainder, "debugger.pid.") ||
-					strings.HasPrefix(remainder, "debugger.core.") ||
-					strings.HasPrefix(remainder, "debugger.name.") ||
-					strings.HasPrefix(remainder, "debugserver.name.") {
-					return fmt.Errorf("parse components: ambiguous name alias")
-				}
+			seenPID = true
+			if component.Role == ComponentDebugServer {
+				return fmt.Errorf("parse components: conflicting component roles")
 			}
-			name := strings.TrimSpace(strings.Join(aliases[index:], ","))
-			if strings.HasPrefix(alias, "debugger.name.") {
-				component.Role = ComponentProgram
-				component.Name = strings.TrimPrefix(name, "debugger.name.")
+			if seenName {
+				component.NameAmbiguous = true
 			} else {
-				if component.ProcessID != 0 {
+				component.Role = ComponentPIDAlias
+				component.ProcessID = processID
+			}
+		case strings.HasPrefix(alias, "debugger.core."):
+			if !validComponentCoreAlias(strings.TrimPrefix(alias, "debugger.core.")) {
+				return fmt.Errorf("parse components: invalid core alias")
+			}
+			if seenName {
+				component.NameAmbiguous = true
+			}
+		case strings.HasPrefix(alias, "debugger.name."), strings.HasPrefix(alias, "debugserver.name."):
+			if seenName {
+				return fmt.Errorf("parse components: conflicting name aliases")
+			}
+			seenName = true
+			prefix := "debugger.name."
+			if strings.HasPrefix(alias, prefix) {
+				component.Role = ComponentProgram
+			} else {
+				if seenPID {
 					return fmt.Errorf("parse components: conflicting component roles")
 				}
+				prefix = "debugserver.name."
 				component.Role = ComponentDebugServer
-				component.Name = strings.TrimPrefix(name, "debugserver.name.")
 			}
-			if strings.TrimSpace(component.Name) == "" {
+			if strings.TrimSpace(strings.TrimPrefix(alias, prefix)) == "" {
 				return fmt.Errorf("parse components: empty name alias")
 			}
-			return nil
+			// Keep all commas and alias-looking bytes: only routed P establishes
+			// the selected program's full ELF path.
+			component.Name = strings.TrimPrefix(strings.TrimSpace(strings.Join(aliases[index:], ",")), prefix)
 		}
 	}
 	return nil
+}
+
+// Observed core aliases are an ordinal or a server name followed by an ordinal.
+// Syntax validation never establishes a target-core identity.
+func validComponentCoreAlias(suffix string) bool {
+	parts := strings.Split(suffix, ".")
+	if _, ok := parseUint(parts[len(parts)-1]); !ok {
+		return false
+	}
+	for _, part := range parts[:len(parts)-1] {
+		if part == "" {
+			return false
+		}
+		for _, c := range part {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

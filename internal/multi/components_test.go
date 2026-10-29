@@ -43,7 +43,7 @@ func TestParseComponentsAliasLists(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := components[0]
-			if got.Role != test.role || got.ProcessID != test.processID || got.Name != test.program {
+			if got.Role != test.role || got.ProcessID != test.processID || got.Name != test.program || got.NameAmbiguous {
 				t.Fatalf("component = %#v", got)
 			}
 		})
@@ -59,15 +59,14 @@ func TestParseComponentsRejectsInvalidAliasLists(t *testing.T) {
 		"debugger.core.0, debugger.pid.18446744073709551616",
 		"debugger.pid.1, debugger.pid.1",
 		"debugger.pid.1, debugger.pid.2",
-		"debugger.name.one, debugger.pid.1",
 		"debugger.name.one, debugger.pid.invalid",
-		"debugger.name.one, debugger.core.0",
 		"debugger.name.one, debugger.name.one",
 		"debugger.name.one, debugger.name.two",
 		"debugger.pid.1, debugserver.name.server",
 		"debugserver.name.server, debugger.pid.1",
 		"debugger.name.one, debugserver.name.server",
 		"debugserver.name.server, debugger.name.one",
+		"debugserver.name.server, debugserver.name.server",
 		"debugger.pid.1, debugger.name.",
 		"debugger.pid.1, , debugger.core.0",
 		"debugger.pid.1,",
@@ -76,6 +75,75 @@ func TestParseComponentsRejectsInvalidAliasLists(t *testing.T) {
 		t.Run(descriptor, func(t *testing.T) {
 			if _, err := ParseComponents("component.1 (" + descriptor + ")\n"); err == nil {
 				t.Fatal("ParseComponents() accepted invalid or ambiguous aliases")
+			}
+		})
+	}
+}
+
+func TestParseComponentsNameFirstCapture(t *testing.T) {
+	components, err := ParseComponents(golden(t, "components_name_first.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 5 {
+		t.Fatalf("components = %#v", components)
+	}
+	got := components[2]
+	wantName := `X:\fixture\release.elf, debugger.pid.7, debugger.core.0, debugger.core.fixture-server.exe.0`
+	if got.ID != "component.15" || got.Role != ComponentProgram || got.ProcessID != 0 || got.Name != wantName || !got.NameAmbiguous {
+		t.Fatalf("name-first component = %#v", got)
+	}
+	if components[3].Role != ComponentDebugServer || components[3].NameAmbiguous || components[4].Role != ComponentPIDAlias || components[4].ProcessID != 8 {
+		t.Fatalf("other components = %#v", components)
+	}
+}
+
+func TestParseComponentsPreservesAmbiguousNameTail(t *testing.T) {
+	tests := []struct {
+		descriptor, name string
+		pid              uint64
+	}{
+		{"debugger.name.one, debugger.pid.1", "one, debugger.pid.1", 0},
+		{"debugger.name.one, debugger.core.0", "one, debugger.core.0", 0},
+		{"debugger.name.one, debugger.core.fixture-server.exe.0, debugger.pid.1", "one, debugger.core.fixture-server.exe.0, debugger.pid.1", 0},
+		{"debugger.pid.7, debugger.name.one, debugger.core.0", "one, debugger.core.0", 7},
+		{"debugger.name.one,two.elf, debugger.pid.1", "one,two.elf, debugger.pid.1", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.descriptor, func(t *testing.T) {
+			components, err := ParseComponents("component.1 (" + tt.descriptor + ")\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := components[0]
+			if got.Role != ComponentProgram || got.Name != tt.name || got.ProcessID != tt.pid || !got.NameAmbiguous {
+				t.Fatalf("component = %#v", got)
+			}
+		})
+	}
+}
+
+func TestParseComponentsRejectsMalformedNameSuffixes(t *testing.T) {
+	for _, descriptor := range []string{
+		"debugger.name.one, debugger.pid.0",
+		"debugger.name.one, debugger.pid.-1",
+		"debugger.name.one, debugger.pid.",
+		"debugger.name.one, debugger.pid.18446744073709551616",
+		"debugger.name.one, debugger.pid.1, debugger.pid.1",
+		"debugger.name.one, debugger.pid.1, debugger.pid.2",
+		"debugger.pid.1, debugger.name.one, debugger.pid.1",
+		"debugger.name.one, debugger.core.",
+		"debugger.name.one, debugger.core.invalid",
+		"debugger.name.one, debugger.core.server..0",
+		"debugger.name.one, debugger.core.server.-1",
+		"debugger.name.one, debugger.core.18446744073709551616",
+		"debugger.name.one, , debugger.core.0",
+		"debugger.name.one,",
+		"debugger.name., debugger.pid.1",
+	} {
+		t.Run(descriptor, func(t *testing.T) {
+			if _, err := ParseComponents("component.1 (" + descriptor + ")\n"); err == nil {
+				t.Fatal("accepted malformed suffix")
 			}
 		})
 	}
