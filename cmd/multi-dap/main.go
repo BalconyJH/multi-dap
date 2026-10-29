@@ -130,6 +130,8 @@ func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Wr
 		return runProxy(ctx, args[1:], stdin, stdout)
 	case "profile":
 		return runProfile(ctx, args[1:], stdout)
+	case "trace":
+		return runTrace(ctx, args[1:], stdout)
 	case "doctor", "check":
 		return runCheck(args[1:], stdout)
 	case "diagnose":
@@ -765,5 +767,5 @@ type usageError string
 func (e usageError) Error() string { return string(e) + "\n" + usage() }
 
 func usage() string {
-	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n    [--perf-output <absolute-new.json> [--perf-max-events <1..100000>]] (requires --config)\n  multi-dap profile import --input <absolute.csv> --mapping <absolute.json> --output <absolute-new.json>\n  multi-dap doctor|check --config <project.toml>\n"
+	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n    [--perf-output <absolute-new.json> [--perf-max-events <1..100000>]] (requires --config)\n  multi-dap profile import --input <absolute.csv> --mapping <absolute.json> --output <absolute-new.json>\n  multi-dap trace normalize --input <absolute-capture.json> --output <absolute-new.json> [--chrome-output <absolute-new-trace.json>]\n  multi-dap doctor|check --config <project.toml>\n"
 }
