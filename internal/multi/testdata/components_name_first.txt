@@ -1,0 +1,6 @@
+The currently registered components are:
+    component_manager.0
+    component.1
+    component.15 (debugger.name.X:\fixture\release.elf, debugger.pid.7, debugger.core.0, debugger.core.fixture-server.exe.0)
+    component.16 (debugserver.name.fixture-server.exe)
+    component.18 (debugger.pid.8, debugger.core.1, debugger.core.fixture-server.exe.1)
