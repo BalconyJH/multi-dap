@@ -371,6 +371,8 @@ func classifyTerminalOperation(metadata daemon.TerminalMetadata) control.Termina
 		return control.TerminalOperationBreakpointCleanup
 	case actor.OperationInspection:
 		return control.TerminalOperationInspection
+	case actor.OperationTrace:
+		return control.TerminalOperationTrace
 	case actor.OperationRollbackClose:
 		return control.TerminalOperationRollbackClose
 	default:

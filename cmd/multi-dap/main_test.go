@@ -474,6 +474,9 @@ func TestClassifyTerminalUsesStableCauseClasses(t *testing.T) {
 }
 
 func TestClassifyTerminalOperationUsesActorMetadata(t *testing.T) {
+	if got := classifyTerminalOperation(daemon.TerminalMetadata{ActorOperation: actor.OperationTrace, HasActorOperation: true}); got != control.TerminalOperationTrace {
+		t.Fatalf("native trace operation = %q", got)
+	}
 	if got := classifyTerminalOperation(daemon.TerminalMetadata{ActorOperation: actor.OperationInspection, HasActorOperation: true}); got != control.TerminalOperationInspection {
 		t.Fatalf("inspection operation = %q", got)
 	}

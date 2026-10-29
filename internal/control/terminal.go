@@ -45,6 +45,7 @@ const (
 	TerminalOperationBreakpoints       TerminalOperation = "breakpoints"
 	TerminalOperationBreakpointCleanup TerminalOperation = "breakpoint-cleanup"
 	TerminalOperationInspection        TerminalOperation = "inspection"
+	TerminalOperationTrace             TerminalOperation = "trace"
 	TerminalOperationRollbackClose     TerminalOperation = "rollback-close"
 )
 
@@ -182,7 +183,7 @@ func validateTerminalRecord(record TerminalRecord, probeID string) error {
 	switch record.Operation {
 	case "", TerminalOperationUnknown, TerminalOperationOpen, TerminalOperationCores, TerminalOperationState,
 		TerminalOperationExecution, TerminalOperationBreakpoints, TerminalOperationBreakpointCleanup,
-		TerminalOperationInspection, TerminalOperationRollbackClose:
+		TerminalOperationInspection, TerminalOperationTrace, TerminalOperationRollbackClose:
 		return nil
 	default:
 		return errors.New("control: invalid terminal record operation")
