@@ -58,6 +58,9 @@ type Capabilities struct {
 	// levels, and totalFrames.
 	SupportsDelayedStackTraceLoading bool `json:"supportsDelayedStackTraceLoading"`
 	SupportsSteppingGranularity      bool `json:"supportsSteppingGranularity"`
+	// This vendor capability describes the wired experimental request surface,
+	// not native runtime, source-binding, or hardware qualification.
+	MultiDapSupportsNativeTraceRequests bool `json:"multiDapSupportsNativeTraceRequests,omitempty"`
 }
 
 // AttachArguments retains DAP 1.71's restart token without imposing any
@@ -158,6 +161,13 @@ const (
 	ActionWriteMemory
 	ActionDisassemble
 	ActionDisconnect
+	ActionTraceOpen
+	ActionTracePoll
+	ActionTraceRead
+	ActionTraceStart
+	ActionTraceStop
+	ActionTraceClose
+	ActionTraceStatus
 )
 
 // Action is the complete vocabulary the frontend presents to Debugger Core.
@@ -180,6 +190,10 @@ type Action struct {
 	WriteMemory    WriteMemoryArguments
 	Disassemble    DisassembleArguments
 	Disconnect     DisconnectArguments
+	TraceOpen      NativeTraceOpenArguments
+	TraceHandle    NativeTraceHandleArguments
+	TraceRead      NativeTraceReadArguments
+	TraceControl   NativeTraceControlArguments
 }
 
 type ActionResult struct {
@@ -195,6 +209,9 @@ type ActionResult struct {
 	ReadMemory  ReadMemoryBody
 	WriteMemory WriteMemoryBody
 	Disassembly []DisassembledInstruction
+	// TraceBody contains only JSON marshaled from the backend's typed native
+	// trace result. It is not a raw debugger command or output passthrough.
+	TraceBody json.RawMessage
 }
 
 // Backend is implemented by the session-facing Debugger Core adapter. The
