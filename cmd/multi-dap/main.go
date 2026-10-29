@@ -21,6 +21,7 @@ import (
 	"github.com/Tacrolimus/multi-dap/internal/core/actor"
 	"github.com/Tacrolimus/multi-dap/internal/core/session"
 	"github.com/Tacrolimus/multi-dap/internal/daemon"
+	"github.com/Tacrolimus/multi-dap/internal/perf"
 	"github.com/Tacrolimus/multi-dap/internal/version"
 )
 
@@ -489,6 +490,9 @@ func runProxy(ctx context.Context, args []string, stdin io.Reader, stdout io.Wri
 	if err != nil {
 		return err
 	}
+	if target.perf.output != "" {
+		return runPerfProxy(ctx, record, target.perf, stdin, stdout)
+	}
 	return control.Proxy(ctx, record, stdin, stdout)
 }
 
@@ -497,6 +501,7 @@ type proxyTarget struct {
 	digest  string
 	legacy  bool
 	store   *control.Store
+	perf    proxyPerfOptions
 }
 
 func proxyCommandFlags(args []string) (proxyTarget, error) {
@@ -505,6 +510,8 @@ func proxyCommandFlags(args []string) (proxyTarget, error) {
 	configPath := flags.String("config", "", "project TOML configuration")
 	probeID := flags.String("probe-id", "", "legacy unbound stable probe identity")
 	controlDir := flags.String("control-dir", "", "private daemon control record directory")
+	perfOutput := flags.String("perf-output", "", "new absolute path for a private host-side Chrome Trace JSON")
+	perfMaxEvents := flags.Int("perf-max-events", perf.DefaultMaxEvents, "maximum retained performance events")
 	if err := flags.Parse(args); err != nil {
 		return proxyTarget{}, usageError(err.Error())
 	}
@@ -515,6 +522,22 @@ func proxyCommandFlags(args []string) (proxyTarget, error) {
 		return proxyTarget{}, usageError("proxy accepts exactly one of --config or --probe-id")
 	}
 	target := proxyTarget{legacy: strings.TrimSpace(*configPath) == ""}
+	perfSelected := false
+	flags.Visit(func(option *flag.Flag) {
+		if option.Name == "perf-output" || option.Name == "perf-max-events" {
+			perfSelected = true
+		}
+	})
+	if perfSelected {
+		if target.legacy {
+			return proxyTarget{}, usageError("performance capture requires --config; legacy --probe-id is unsupported")
+		}
+		options, err := validateProxyPerfOptions(*perfOutput, *perfMaxEvents)
+		if err != nil {
+			return proxyTarget{}, usageError(err.Error())
+		}
+		target.perf = options
+	}
 	if strings.TrimSpace(*configPath) != "" {
 		validated, err := loadConfig(*configPath)
 		if err != nil {
@@ -740,5 +763,5 @@ type usageError string
 func (e usageError) Error() string { return string(e) + "\n" + usage() }
 
 func usage() string {
-	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n  multi-dap doctor|check --config <project.toml>\n"
+	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n    [--perf-output <absolute-new.json> [--perf-max-events <1..100000>]] (requires --config)\n  multi-dap doctor|check --config <project.toml>\n"
 }
