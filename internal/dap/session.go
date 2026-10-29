@@ -92,6 +92,20 @@ func (s *Session) Handle(ctx context.Context, request Envelope) []Envelope {
 		return s.disassemble(ctx, request)
 	case "disconnect":
 		return s.disconnect(ctx, request)
+	case "multi-dap/trace/open":
+		return s.nativeTrace(ctx, request, ActionTraceOpen)
+	case "multi-dap/trace/poll":
+		return s.nativeTrace(ctx, request, ActionTracePoll)
+	case "multi-dap/trace/read":
+		return s.nativeTrace(ctx, request, ActionTraceRead)
+	case "multi-dap/trace/start":
+		return s.nativeTrace(ctx, request, ActionTraceStart)
+	case "multi-dap/trace/stop":
+		return s.nativeTrace(ctx, request, ActionTraceStop)
+	case "multi-dap/trace/close":
+		return s.nativeTrace(ctx, request, ActionTraceClose)
+	case "multi-dap/trace/status":
+		return s.nativeTrace(ctx, request, ActionTraceStatus)
 	default:
 		return []Envelope{s.failure(request, "unsupported command: "+request.Command)}
 	}
