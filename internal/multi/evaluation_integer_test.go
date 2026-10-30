@@ -63,10 +63,11 @@ func TestInspectionRunnerEvaluationBareInteger(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := NewInspectionRunner(fixtureInspectionTopology())
-			driver, caller := newTestDriver(t,
+			calls := append(selectedFrameCalls("0_ fixture_entry()\n"),
 				fakeCall{method: "run_commands", params: command("route fixture.component.4 P"), result: commandText("raw", processTable(9, 0x44, StatusStopped, `X:\fixture\core4.elf`))},
 				fakeCall{method: "run_commands", params: command("route fixture.component.4 print 1 + 1"), result: map[string]any{"status": 1, "raw": tt.output, "raw_lossy": tt.lossy}},
 			)
+			driver, caller := newTestDriver(t, calls...)
 			value, err := runner.evaluate(context.Background(), driver, inspection.CoreID(4), expression)
 			if (err != nil) != tt.wantError {
 				t.Fatalf("evaluate() = (%#v, %v)", value, err)
@@ -95,14 +96,30 @@ func TestInspectionRunnerEvaluationKeepsNamedAndAggregateResults(t *testing.T) {
 	} {
 		t.Run(tt.fixture, func(t *testing.T) {
 			runner := NewInspectionRunner(fixtureInspectionTopology())
-			driver, _ := newTestDriver(t,
+			calls := append(selectedFrameCalls("0_ fixture_entry()\n"),
 				fakeCall{method: "run_commands", params: command("route fixture.component.4 P"), result: commandText("raw", processTable(9, 0x44, StatusStopped, `X:\fixture\core4.elf`))},
 				fakeCall{method: "run_commands", params: command("route fixture.component.4 print fixture_value"), result: commandText("raw", golden(t, tt.fixture))},
 			)
+			driver, _ := newTestDriver(t, calls...)
 			value, err := runner.evaluate(context.Background(), driver, inspection.CoreID(4), expression)
 			if err != nil || value.Name != tt.name || value.Value != tt.display || value.HasChildren != tt.children {
 				t.Fatalf("evaluate() = (%#v, %v)", value, err)
 			}
 		})
+	}
+}
+
+func TestInspectionRunnerEvaluationRejectsSelectedCaller(t *testing.T) {
+	expression, err := inspection.NewExpression("fixture_value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := NewInspectionRunner(fixtureInspectionTopology())
+	driver, caller := newTestDriver(t, selectedFrameCalls("0  main()\n1_ caller()\n")...)
+	if _, err := runner.evaluate(context.Background(), driver, inspection.CoreID(4), expression); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("evaluate() error = %v, want unsupported selected caller", err)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("unconsumed context checks: %#v", caller.calls)
 	}
 }

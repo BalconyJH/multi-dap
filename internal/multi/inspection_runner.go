@@ -84,20 +84,24 @@ func (r *InspectionRunner) stack(ctx context.Context, driver *Driver, core inspe
 	if err != nil {
 		return nil, fmt.Errorf("multi: routed stack text: %w", err)
 	}
-	pcResult, err := routedInspectionCommand(ctx, r.topology, driver, core, programCounterCommand)
-	if err != nil {
-		return nil, fmt.Errorf("multi: routed program counter: %w", err)
-	}
-	pc, err := ParseProgramCounter(pcResult.Raw)
-	if err != nil {
-		return nil, fmt.Errorf("multi: routed program counter text: %w", err)
+	var pc uint64
+	hasPC := selectedTopFrame(frames)
+	if hasPC {
+		pcResult, err := routedInspectionCommand(ctx, r.topology, driver, core, programCounterCommand)
+		if err != nil {
+			return nil, fmt.Errorf("multi: routed program counter: %w", err)
+		}
+		pc, err = ParseProgramCounter(pcResult.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("multi: routed program counter text: %w", err)
+		}
 	}
 	out := make([]inspection.RawFrame, 0, len(frames))
 	for _, frame := range frames {
 		raw := inspection.RawFrame{
 			Index: frame.Index, Name: frame.Function, DebugPath: frame.Path, Line: frame.Line, Column: frame.Column,
 		}
-		if frame.Selected {
+		if hasPC && frame.Index == 0 {
 			raw.HasInstructionAddress = true
 			raw.InstructionAddress = pc
 		}
@@ -117,7 +121,7 @@ func (r *InspectionRunner) Scopes(ctx context.Context, client *bridge.Client, co
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.topology.verifiedRoute(ctx, driver, int(core)); err != nil {
+	if err := r.requireSelectedTopFrame(ctx, driver, core); err != nil {
 		return nil, err
 	}
 	return []inspection.RawScope{{Name: "Locals", Kind: inspection.ScopeLocals, Locator: topFrameLocals}}, nil
@@ -143,7 +147,7 @@ func (r *InspectionRunner) Variables(ctx context.Context, client *bridge.Client,
 	if err != nil {
 		return inspection.RawValuePage{}, err
 	}
-	result, err := routedInspectionCommand(ctx, r.topology, driver, core, "l")
+	result, err := r.topFrameCommand(ctx, driver, core, "l")
 	if err != nil {
 		return inspection.RawValuePage{}, fmt.Errorf("multi: routed locals: %w", err)
 	}
@@ -182,7 +186,7 @@ func (r *InspectionRunner) Children(ctx context.Context, client *bridge.Client, 
 	if err != nil {
 		return inspection.RawValuePage{}, err
 	}
-	result, err := routedInspectionCommand(ctx, r.topology, driver, core, "print "+locator.Expression())
+	result, err := r.topFrameCommand(ctx, driver, core, "print "+locator.Expression())
 	if err != nil {
 		return inspection.RawValuePage{}, fmt.Errorf("multi: routed variable children: %w", err)
 	}
@@ -218,7 +222,7 @@ func (r *InspectionRunner) Evaluate(ctx context.Context, client *bridge.Client, 
 }
 
 func (r *InspectionRunner) evaluate(ctx context.Context, driver *Driver, core inspection.CoreID, expression inspection.Expression) (inspection.RawValue, error) {
-	result, err := routedInspectionCommand(ctx, r.topology, driver, core, "print "+expression.Text())
+	result, err := r.topFrameCommand(ctx, driver, core, "print "+expression.Text())
 	if err != nil {
 		return inspection.RawValue{}, fmt.Errorf("multi: routed evaluate: %w", err)
 	}
@@ -234,6 +238,39 @@ func (r *InspectionRunner) evaluate(ctx context.Context, driver *Driver, core in
 		Name: expression.Text(), Value: aggregate.Display, Access: inspection.Access{Kind: inspection.AccessRoot},
 		HasChildren: true, NamedChildren: -1, IndexedChildren: -1,
 	}, nil
+}
+
+func (r *InspectionRunner) topFrameCommand(ctx context.Context, driver *Driver, core inspection.CoreID, command string) (commandResult, error) {
+	if err := r.requireSelectedTopFrame(ctx, driver, core); err != nil {
+		return commandResult{}, err
+	}
+	return routedInspectionCommand(ctx, r.topology, driver, core, command)
+}
+
+func (r *InspectionRunner) requireSelectedTopFrame(ctx context.Context, driver *Driver, core inspection.CoreID) error {
+	result, err := routedInspectionCommand(ctx, r.topology, driver, core, normalizedCallsCommand)
+	if err != nil {
+		return fmt.Errorf("multi: selected frame: %w", err)
+	}
+	frames, err := ParseStack(result.Raw)
+	if err != nil {
+		return fmt.Errorf("multi: selected frame text: %w", err)
+	}
+	if !selectedTopFrame(frames) {
+		return unsupportedInspection("top frame is not selected")
+	}
+	return nil
+}
+
+// ParseStack has already rejected duplicate indices and multiple selections.
+// Never select a frame implicitly: warm acquisition preserves debugger state.
+func selectedTopFrame(frames []StackFrame) bool {
+	for _, frame := range frames {
+		if frame.Selected {
+			return frame.Index == 0
+		}
+	}
+	return false
 }
 
 func (r *InspectionRunner) driver(client *bridge.Client) (*Driver, error) {

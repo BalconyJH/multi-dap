@@ -39,7 +39,7 @@ func TestInspectionRunnerTopologyBindingIsOneShot(t *testing.T) {
 	}
 }
 
-func TestInspectionRunnerStackAddsPCOnlyToSelectedFrame(t *testing.T) {
+func TestInspectionRunnerStackAddsPCOnlyToSelectedTopFrame(t *testing.T) {
 	runner := NewInspectionRunner(fixtureInspectionTopology())
 	driver, caller := newTestDriver(t,
 		fakeCall{method: "run_commands", params: command("route fixture.component.4 P"), result: commandText("raw", processTable(9, 0x44, StatusStopped, `X:\fixture\core4.elf`))},
@@ -56,6 +56,80 @@ func TestInspectionRunnerStackAddsPCOnlyToSelectedFrame(t *testing.T) {
 	}
 	if len(caller.calls) != 0 {
 		t.Fatalf("unconsumed calls: %#v", caller.calls)
+	}
+}
+
+func TestInspectionRunnerStackOmitsPCWithoutSelectedTopFrame(t *testing.T) {
+	for _, output := range []string{
+		"0  fixture_entry()\n1_ caller()\n",
+		"0  fixture_entry()\n1  caller()\n",
+	} {
+		runner := NewInspectionRunner(fixtureInspectionTopology())
+		driver, caller := newTestDriver(t, selectedFrameCalls(output)...)
+		frames, err := runner.stack(context.Background(), driver, inspection.CoreID(4))
+		if err != nil || len(frames) != 2 {
+			t.Fatalf("stack() = (%#v, %v)", frames, err)
+		}
+		for _, frame := range frames {
+			if frame.HasInstructionAddress {
+				t.Fatalf("unverified frame context has instruction address: %#v", frame)
+			}
+		}
+		if len(caller.calls) != 0 {
+			t.Fatalf("unconsumed calls: %#v", caller.calls)
+		}
+	}
+}
+
+func TestInspectionRunnerTopFrameCommandsRejectUnprovenContext(t *testing.T) {
+	for _, command := range []string{"l", "print fixture_value", "print (fixture_value).child"} {
+		for _, test := range []struct {
+			name, stack string
+			want        error
+		}{
+			{"caller selected", "0  main()\n1_ caller()\n", ErrUnsupported},
+			{"no selection", "0  main()\n1  caller()\n", ErrUnsupported},
+			{"multiple selections", "0_ main()\n1_ caller()\n", ErrInspectionFormat},
+			{"duplicate index", "0_ main()\n0  caller()\n", ErrInspectionFormat},
+		} {
+			t.Run(command+"/"+test.name, func(t *testing.T) {
+				runner := NewInspectionRunner(fixtureInspectionTopology())
+				driver, caller := newTestDriver(t, selectedFrameCalls(test.stack)...)
+				if _, err := runner.topFrameCommand(context.Background(), driver, inspection.CoreID(4), command); !errors.Is(err, test.want) {
+					t.Fatalf("topFrameCommand() error = %v, want %v", err, test.want)
+				}
+				if len(caller.calls) != 0 {
+					t.Fatalf("unconsumed context checks: %#v", caller.calls)
+				}
+			})
+		}
+	}
+}
+
+func TestInspectionRunnerTopFrameContextIsRecheckedForEachRead(t *testing.T) {
+	runner := NewInspectionRunner(fixtureInspectionTopology())
+	calls := selectedFrameCalls("0_ main()\n1  caller()\n")
+	calls = append(calls,
+		fakeCall{method: "run_commands", params: command("route fixture.component.4 P"), result: commandText("raw", processTable(9, 0x44, StatusStopped, `X:\fixture\core4.elf`))},
+		fakeCall{method: "run_commands", params: command("route fixture.component.4 l"), result: commandText("raw", "fixture_value = 42\n")},
+	)
+	calls = append(calls, selectedFrameCalls("0  main()\n1_ caller()\n")...)
+	driver, caller := newTestDriver(t, calls...)
+	if result, err := runner.topFrameCommand(context.Background(), driver, inspection.CoreID(4), "l"); err != nil || result.Raw != "fixture_value = 42\n" {
+		t.Fatalf("first read = (%#v, %v)", result, err)
+	}
+	if _, err := runner.topFrameCommand(context.Background(), driver, inspection.CoreID(4), "l"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("second read error = %v, want unsupported frame context", err)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("unconsumed calls: %#v", caller.calls)
+	}
+}
+
+func selectedFrameCalls(stack string) []fakeCall {
+	return []fakeCall{
+		{method: "run_commands", params: command("route fixture.component.4 P"), result: commandText("raw", processTable(9, 0x44, StatusStopped, `X:\fixture\core4.elf`))},
+		{method: "run_commands", params: command("route fixture.component.4 " + normalizedCallsCommand), result: commandText("raw", stack)},
 	}
 }
 
