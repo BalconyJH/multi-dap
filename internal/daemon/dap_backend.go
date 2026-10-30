@@ -105,7 +105,12 @@ func NewBackendWithOptions(core Core, options BackendOptions) (*Backend, error) 
 	return backend, nil
 }
 
-func (b *Backend) DAPCapabilities() dap.Capabilities { return b.capabilities }
+func (b *Backend) DAPCapabilities() dap.Capabilities {
+	result := b.capabilities
+	core, ok := b.core.(nativeTraceCore)
+	result.MultiDapSupportsNativeTraceRequests = ok && core.TraceEnabled()
+	return result
+}
 
 // BindPublisher resolves the Server <-> Backend construction cycle. Rebinding
 // would let an old frontend emit into a different server, so it is forbidden.
@@ -162,6 +167,9 @@ func (b *Backend) Execute(ctx context.Context, action dap.Action) (dap.ActionRes
 		return b.next(ctx, action.Next.ThreadID)
 	case dap.ActionStepOut:
 		return dap.ActionResult{}, errors.New("daemon: unsupported DAP action stepOut")
+	case dap.ActionTraceOpen, dap.ActionTracePoll, dap.ActionTraceRead,
+		dap.ActionTraceStart, dap.ActionTraceStop, dap.ActionTraceClose, dap.ActionTraceStatus:
+		return b.nativeTrace(ctx, action)
 	case dap.ActionDisconnect:
 		b.releaseActive()
 		return dap.ActionResult{}, nil
