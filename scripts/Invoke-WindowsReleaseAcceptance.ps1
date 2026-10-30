@@ -534,7 +534,7 @@ try {
         Write-Output "release policy public_distribution_approved=$($policy.public_distribution_approved.ToString().ToLowerInvariant())"
     }
     Invoke-ReleaseStep -Results $results -Name 'bridge-host-tests' -Action {
-        Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'bridge.test_bridge') -Description 'bridge host tests'
+        Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'bridge.test_bridge', 'bridge.test_timemachine_native', 'bridge.test_timemachine_helper') -Description 'bridge and native trace helper host tests'
     }
     Invoke-ReleaseStep -Results $results -Name 'recon-host-tests' -Action {
         Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'discover', '-s', 'recon/tests') -Description 'recon host tests'
@@ -573,6 +573,7 @@ try {
         $resolvedMultiPython = Resolve-MultiPython -RequestedPython3 $MultiPython3 -RequestedPython2 $MultiPython2 -LegacyRequestedPath $MultiPython
         if ($null -eq $resolvedMultiPython) {
             Skip-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Reason 'No usable standalone MULTI Python 3 or Python 2 interpreter was found; pass -MultiPython3, -MultiPython2, or set MULTI_INSTALLATION/GHS_MULTI_ROOT'
+            Skip-ReleaseStep -Results $results -Name 'native-timemachine-python-compile' -Reason 'Native TimeMachine requires a standalone Python 3.8+ interpreter'
         } else {
             Invoke-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Action {
                 $runtimeLabel = "Python $($resolvedMultiPython.Version)"
@@ -595,6 +596,27 @@ try {
                     }
                 }
             }
+            if ($resolvedMultiPython.Version -eq 3) {
+                Invoke-ReleaseStep -Results $results -Name 'native-timemachine-python-compile' -Action {
+                    $compileDirectory = $null
+                    try {
+                        $compileDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("multi-dap-release-acceptance-" + [guid]::NewGuid().ToString('N'))
+                        [System.IO.Directory]::CreateDirectory($compileDirectory) | Out-Null
+                        $sources = @(
+                            (Join-Path $repositoryRoot 'bridge\timemachine_native.py'),
+                            (Join-Path $repositoryRoot 'bridge\timemachine_helper.py')
+                        )
+                        $compiler = 'import os,py_compile,sys; assert sys.version_info >= (3,8), "native TimeMachine requires Python 3.8+"; [py_compile.compile(path, os.path.join(sys.argv[1], os.path.basename(path) + "c"), doraise=True) for path in sys.argv[2:]]'
+                        Invoke-NativeCommand -FilePath $resolvedMultiPython.Path -Arguments (@('-B', '-c', $compiler, $compileDirectory) + $sources) -Description 'native TimeMachine binding and helper Python 3 compilation (no DLL loading)'
+                    } finally {
+                        if ($null -ne $compileDirectory) {
+                            Remove-OwnedTemporaryDirectory -Path $compileDirectory
+                        }
+                    }
+                }
+            } else {
+                Skip-ReleaseStep -Results $results -Name 'native-timemachine-python-compile' -Reason 'The legacy bridge supports Python 2; the separate native TimeMachine mechanism requires Python 3.8+'
+            }
         }
 
         Invoke-ReleaseStep -Results $results -Name 'windows-package-reproducibility' -Action {
@@ -606,6 +628,7 @@ try {
     } else {
         Skip-ReleaseStep -Results $results -Name 'go-test-race' -Reason 'Fast mode omits race instrumentation'
         Skip-ReleaseStep -Results $results -Name 'multi-python-py-compile' -Reason 'Fast mode omits MULTI embedded Python compilation'
+        Skip-ReleaseStep -Results $results -Name 'native-timemachine-python-compile' -Reason 'Fast mode omits native TimeMachine Python compilation'
         Skip-ReleaseStep -Results $results -Name 'windows-package-reproducibility' -Reason 'Fast mode omits the two-build package check'
         Skip-ReleaseStep -Results $results -Name 'winget-manifest' -Reason 'Fast mode omits WinGet manifest validation'
     }

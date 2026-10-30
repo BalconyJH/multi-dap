@@ -58,12 +58,25 @@ source remains compatible with Python 2.7 for the explicit legacy fallback.
 Host tests run under Python 3.12 and fake the Green Hills modules:
 
 ```powershell
-uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest bridge.test_bridge
+uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest bridge.test_bridge bridge.test_timemachine_native bridge.test_timemachine_helper
 uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest discover -s recon/tests
 ```
 
 These tests prove compatibility logic, framing, sanitization, parsing, and
 bounded behavior. They do not open MULTI or connect to hardware.
+
+`bridge/timemachine_native.py` and `bridge/timemachine_helper.py` are separate
+Python 3.8+ modules. Their tests use fake native functions; importing them,
+starting the helper without an open request, or running static ABI inspection
+does not load a vendor DLL. They are not part of the Python 2 legacy bridge
+contract. Full release acceptance compiles both under the selected Python
+3.8+ runtime, or reports a separate skip for the legacy Python 2 runtime.
+
+Go tests for `internal/tracebridge`, `internal/tracecontrol`, actor, and daemon
+exercise native request/response handling with owned fake processes. Windows
+tests include abrupt parent exit, kill-on-close Jobs, inherited source handles,
+and actual child reaping. These do not validate vendor DLL behavior, native
+session binding, or a hardware collection workflow.
 
 To byte-compile with an actual MULTI interpreter, pass its standalone
 `python.exe` path to release acceptance. Python 3 is preferred; use

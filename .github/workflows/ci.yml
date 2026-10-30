@@ -68,8 +68,8 @@ jobs:
           enable-cache: false
       - name: Install host-test Python
         run: uv python install 3.12
-      - name: Test the MULTI bridge host surface
-        run: uv run --no-project --no-python-downloads --python 3.12 -m unittest bridge.test_bridge
+      - name: Test the MULTI bridge and native trace helper host surface
+        run: uv run --no-project --no-python-downloads --python 3.12 -m unittest bridge.test_bridge bridge.test_timemachine_native bridge.test_timemachine_helper
       - name: Test the reconnaissance host surface
         run: uv run --no-project --no-python-downloads --python 3.12 -m unittest discover -s recon/tests
 
