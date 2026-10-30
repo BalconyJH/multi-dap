@@ -8,6 +8,35 @@ version is tagged.
 
 ### Added
 
+- Explicitly mapped, bounded Profiler CSV analysis with exact decimal/count
+  ranking, source identity and line ranges, missing-value preservation, and
+  input/mapping hashes. Real vendor-format qualification remains open.
+- Versioned TimeMachine packet decoding and offline normalization, including
+  PID/previous-PID attribution, discontinuities, generation/clock-epoch
+  separation, and picosecond-only Chrome trace export.
+- A separate Python 3.8+ native TimeMachine mechanism with static ABI/export
+  inspection, pinned DLL loading, explicit session selection, bounded
+  callbacks, and guarded native operations.
+- Experimental actor-owned native trace collection through seven custom DAP
+  requests, with a bounded helper event loop, process deadlines, frontend and
+  source-generation fencing, explicit start/stop admission, local recovery
+  receipts, and Windows Job/inherited-lease lifetime protection. Source
+  association is operator-declared; native-runtime and hardware qualification
+  remain open.
+- A read-only `trace capture` client for an already running config-bound daemon.
+  It captures one validated packet interval through the existing authenticated
+  DAP path, explicitly disconnects, and writes a private native-capture file
+  without starting collection or performing target execution operations.
+- Opt-in, config-bound proxy performance capture with bounded Chrome Trace JSON,
+  request latency summaries, loss/health counters, payload redaction, and
+  exclusive private output files. This observes the host DAP path, not target
+  CPU execution.
+- Optional VS Code attach properties `perfOutput` and `perfMaxEvents` for the
+  existing host-timeline proxy, with explicit private-output selection,
+  variable-substitution validation, and no default recording.
+- A MULTI 8 adaptation study covering the 7.1.6d-to-8.1.4 TimeMachine header
+  contract differences, native profiling candidates, and deprecated trace
+  interfaces.
 - MULTI IDE 8.1.4 / Compiler 2024.1.4 compatibility documentation and a
   configuration-bound embedded Python runtime selector. Python 3 is now the
   preferred `mpythonrun` runtime; Python 2.7 remains an explicit fallback.
