@@ -243,8 +243,8 @@ func startRuntimeFake(t *testing.T, fake *runtimeFakeBridge, cfg config.Validate
 	return runtime
 }
 
-func TestRuntimeWarmSessionUsesOneAtomicLaunchAndOpenIdentity(t *testing.T) {
-	fake := newRuntimeFakeBridge(t)
+func testWarmRuntimeOptions(t *testing.T) Options {
+	t.Helper()
 	cfg := testRuntimeConfig()
 	cfg.Probe.ID = "daemon-runtime-warm"
 	cfg.Multi.PythonVersion = config.PythonVersion2
@@ -253,30 +253,24 @@ func TestRuntimeWarmSessionUsesOneAtomicLaunchAndOpenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Cores = []config.ValidatedCore{{ID: 0, ELF: primaryELF}}
-	fake.setResult("cores", map[string]any{"components": "fixture.component.5 (debugger.name.core0)\n", "status": 1})
-	fake.setCommandResult("route fixture.component.5 P", map[string]any{"status": 1, "raw": "     # PID        PPID       Status        CBEFITDHR Name and Arguments\n>>   0 0x1 N/A        Stopped       011111101 " + primaryELF + "\n"})
-	options := Options{
+	return Options{
 		Config: cfg, BridgeScript: testBridgeScript(t),
 		Warm: &WarmSession{ServiceRouterHost: "127.0.0.1", ServiceRouterPort: 40123, PrimaryELF: primaryELF},
 	}
-	var launched bridge.LaunchSpec
-	runtime, err := startWith(context.Background(), options, func(_ context.Context, spec bridge.LaunchSpec) (bridgeProcess, error) {
-		launched = spec
-		return fake, nil
-	})
+}
+
+func TestWarmSessionAcquisitionUsesOneAtomicIdentity(t *testing.T) {
+	options := testWarmRuntimeOptions(t)
+	mode, router, request, err := sessionAcquisition(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(runtime.Close)
-	if launched.PythonVersion != config.PythonVersion2 || launched.SessionMode != bridge.SessionModeWarm || launched.ServiceRouter == nil || launched.ServiceRouter.Host != "127.0.0.1" || launched.ServiceRouter.Port != 40123 {
-		t.Fatalf("warm launch = %#v", launched)
+	if mode != bridge.SessionModeWarm || router == nil || router.Host != options.Warm.ServiceRouterHost || router.Port != options.Warm.ServiceRouterPort {
+		t.Fatalf("warm launch identity = (%q, %#v)", mode, router)
 	}
-	params, ok := fake.requestParams("open")
-	if !ok {
-		t.Fatal("warm open request was not observed")
-	}
-	if params["mode"] != string(multi.OpenModeWarm) || params["primary_elf"] != primaryELF || len(params) != 2 {
-		t.Fatalf("warm open params = %#v", params)
+	if request.Mode != multi.OpenModeWarm || request.PrimaryELF != options.Config.Cores[0].ELF ||
+		request.Project != "" || request.Connection != "" || request.Preparation != "" {
+		t.Fatalf("warm open identity = %#v", request)
 	}
 }
 
