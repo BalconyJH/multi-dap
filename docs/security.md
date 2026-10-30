@@ -45,6 +45,28 @@ Project-specific TOML files belong outside the repository. `recon/out`, local
 config, temporary controls, and hardware scratch data must remain ignored and
 must never enter release archives.
 
+### Optional performance captures
+
+The [proxy performance timeline](performance.md) is opt-in and config-bound.
+It records allowlisted command/event names, sequence numbers, outcomes, timing,
+and observer-health counters, not DAP arguments, response bodies, console text,
+error text, source paths, addresses, symbols, values, or control tokens. Unknown
+names become a fixed label. The control authentication exchange is outside the
+observed stdio streams.
+
+Output uses exclusive file creation: existing paths are never overwritten.
+Windows creates the file with an owner-only ACL; non-Windows creation requests
+mode `0600`. Finalization writes through the original open handle. Use an
+existing private output directory outside the repository, and inspect capture
+contents before sharing: command timing and workflow information can still be
+private even without payloads.
+
+Framing and event storage are bounded. Observer parse failures and overflow are
+reported in capture health rather than changing the forwarded DAP bytes.
+Recording does not add target operations or bypass the actor's execution
+policy. Its payload-free guarantee does not extend to the separately requested
+native/profile artifacts described below.
+
 ## Fail-closed requirements
 
 - Ambiguous core or source identity is an error, never a first-match choice.

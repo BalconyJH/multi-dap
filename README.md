@@ -29,6 +29,8 @@ hardware-observed evidence level. Zed remains unsupported.
 - [Project configuration reference](docs/configuration.md)
 - [Architecture and design](docs/architecture.md)
 - [Capabilities and development status](docs/capabilities.md)
+- [Performance timeline](docs/performance.md)
+- [MULTI 8 adaptation study](docs/ghs-8-adaptation.md)
 - [Operations guide](docs/operations.md)
 - [Developer guide](docs/development.md)
 - [Windows distribution guide](docs/distribution.md)
@@ -147,6 +149,27 @@ go run ./cmd/multi-dap proxy --config C:\private\multi-dap-project.toml
 CLion uses the native Cidr DAP Debug Profile `multi-dap` for each applicable CMake Application configuration (for example, `<your-cmake-application>`); the profile runs `proxy --config "<absolute-project.toml>"` over stdio and uses `{"request":"attach"}` as Launch-tab JSON. Use the same private TOML for the profile and the Before Launch `multi-dap ensure --config "<absolute-project.toml>" --bridge-script "<absolute-path-to-bridge.py>" --acquisition cold` action. The bridge path must be absolute and must not depend on the project working directory. This does not implicitly attempt warm; to reuse an existing session, explicitly use `--bridge-script "<absolute-path-to-bridge.py>" --acquisition warm --primary-elf "<configured-exact-primary-elf>"`. The validated configuration is bound to the daemon's owner-only record, so a same-ID record created from different target semantics is rejected instead of reused. For field-level configuration, see the [CLion configuration guide](docs/clion.md). Click the Debug bug icon, not green Run. Stopping the daemon closes its own bridge; cold runtime disconnects the target connection it created; Windows Job cleanup reaps descendants when the ensure child exits. The implementation does not clean up unrelated MULTI, service-router, or target-server processes by process name.
 
 Explicit cold mode reuses only an authenticated multi-dap daemon and does not scan arbitrary operator-owned MULTI. Choose warm mode for an existing manual session; otherwise a new cold session can contend for licenses or the probe.
+
+## Performance timeline
+
+The config-bound proxy can optionally export a bounded, payload-free Chrome
+Trace JSON file while forwarding the editor's normal DAP conversation:
+
+```powershell
+multi-dap.exe proxy --config C:\private\project.toml `
+  --perf-output C:\private\session-001.trace.json --perf-max-events 10000
+```
+
+Use a new absolute output path in an existing private directory. Recording is
+off by default and does not issue extra target commands. The trace measures
+host-side request round trips and observed DAP events, **not target CPU time,
+function calls, or a sampled call tree**. It is finalized when the proxy returns
+and can be opened with a compatible local Perfetto/Chrome Trace viewer.
+
+See [performance capture and interpretation](docs/performance.md) for limits,
+health counters, privacy, and CLion usage. The
+[MULTI 8 adaptation study](docs/ghs-8-adaptation.md) separates the implemented
+host timeline from native TimeMachine and Profiler qualification requirements.
 
 ## Validation
 
