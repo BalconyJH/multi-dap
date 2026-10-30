@@ -78,15 +78,21 @@ bootstrap, proxy, and control commands. Do not substitute a raw dynamic DAP port
 or the unbound legacy `proxy --probe-id` path. CLion uses its native Cidr DAP
 profile and synchronous Before Launch `ensure`; read the CLion guide for exact
 fields. For VS Code, read [editor integration](../../../docs/m6-packaging-and-editors.md)
-and preserve its software-only validation caveat. Zed is currently unsupported.
+and preserve its software-only validation caveat. The registered Zed source
+extension uses the same local authenticated proxy; read
+[Zed configuration](../../../docs/zed.md) before setting it up. Its host tests
+and Wasm build do not establish actual Zed GUI or target acceptance.
 
 ## Debug within the current contract
 
-- Continue and pause act on the freeze group, not an independently running core.
-  Multicore stepping is unsupported; single-core statement stepping is bounded.
+- Continue, pause, and statement stepping are wired only for a single configured
+  core. Every multicore execution request currently fails closed before bridge
+  I/O because no production execution-domain executor is qualified. Do not
+  substitute a direct primary-window command or assume independent-core control.
 - Inspect variables, memory, and disassembly only on a stopped target within the
   capability matrix. Avoid side-effecting MMIO reads.
 - Source breakpoints require definitive source presence on every configured core.
+  Mutations also require a stopped target and a current control lease/stop epoch.
   Do not bypass unresolved source mapping with speculative commands.
 - Download, reset, step-out, run-to, registers, and memory writes are not currently
   exposed as supported operations. The `require_reset_after_download` policy does
@@ -105,11 +111,16 @@ Read [operations](../../../docs/operations.md) for recovery and ownership rules.
 
 ```powershell
 .\multi-dap.exe diagnose --config C:\private\project.toml
+.\multi-dap.exe doctor --config C:\private\project.toml --processes
 .\multi-dap.exe shutdown --config C:\private\project.toml
 ```
 
 Run shutdown when the task calls for releasing the daemon, not merely because
 inspection is finished. DAP disconnect is not target reset or daemon shutdown.
+The explicit doctor process report is read-only and does not contact MULTI or
+the target. Private executable paths require `--include-paths`. Startup process
+notices and PID/path matches are not ownership or physical-probe availability
+evidence; incomplete snapshots cannot authorize cleanup.
 
 - On configuration mismatch, restore the previous semantic configuration and shut
   down normally before editing runtime values. Do not delete control records to

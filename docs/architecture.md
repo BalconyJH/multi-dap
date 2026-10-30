@@ -351,14 +351,16 @@ is no DAP `continue` request to respond to, so the only way the client learns th
 resumed is the `continued` event:
 
 ```
-continued { threadId: <a core in the resumed freeze group>, allThreadsContinued: true }
+continued { threadId: <a stable configured thread>, allThreadsContinued: false }
 ```
 
-The M1 state sample proves only the freeze-group transition, not which core initiated it.
+The M1 state sample observes a lifecycle transition without proving the state of every core.
 `GetCurPrInfo().pid` is a MULTI process identifier and is never reinterpreted as a DAP thread.
-Because DAP requires `continued.threadId`, M1 names one stable member of the group that did in fact
-resume. `stopped.threadId` is optional and remains absent until the stop arbiter has evidence for a
-specific core; using the first core there would fabricate causality.
+Because DAP requires `continued.threadId`, M1 uses a stable configured thread as
+the protocol fallback; it does not infer all-core execution from that ID.
+`allThreadsContinued` becomes true only with explicit verified execution-domain
+evidence. `stopped.threadId` is optional and remains absent until the stop arbiter
+has evidence for a specific core; using the first core there would fabricate causality.
 
 Stop-bound handles are dropped at the same moment (§6.4), before the event is emitted.
 
@@ -498,6 +500,19 @@ requested   foo.c = {12, 30}
 current     foo.c = {12, 20}
 diff        +30  -20  keep 12
 ```
+
+Source mutation, including an empty replacement and rollback, is admitted only
+while stopped. Queued work retains the control-lease generation and stopped
+epoch and rechecks both before bridge dispatch. Releasing and reacquiring the
+same owner ID does not revive an old request. Cleanup also rechecks its epoch
+and retains pending records if a newer observation makes dispatch unsafe.
+
+Execution invalidates the previous stopped observation without changing the
+canonical reducer state. Subsequent stopped-only work obtains a fresh definitive
+state observation before its epoch guard can pass. Unknown lifecycle samples
+cannot restore freshness or schedule a natural cleanup retry from the retained
+stopped snapshot. Command acknowledgement alone never produces a canonical
+running/stopped event.
 
 A DAP breakpoint is logical and may map to several physical breakpoints, because one source
 file can be compiled into more than one ELF and therefore exist on more than one core:
@@ -675,13 +690,16 @@ core 0 → threadId 1
 core 1 → threadId 2
 ```
 
-The freeze group starts and stops as a unit, so multi-dap must not pretend to support
-single-thread execution:
+The intended freeze-group contract must be established through complete per-core
+observations. Configuration alone does not prove that all cores transition together:
 
 - `supportsSingleThreadExecutionRequests` is advertised as **false**
-- `stopped` carries `allThreadsStopped: true`
-- `continue` responses carry `allThreadsContinued: true`
-- DAP `pause` maps to a group halt; per-thread pause is not accepted
+- `stopped` carries `allThreadsStopped: true` only with explicit verified evidence
+- `continue` responses carry `allThreadsContinued: true` only with explicit verified evidence
+- Current production execution, including continue and pause, is limited to one
+  configured core. Every multicore execution request fails before bridge I/O
+  because the execution domain has no qualified executor; independent per-thread
+  execution is not accepted.
 
 The model is kept extensible for later RTOS-aware work — a thread is conceptually a
 `{Core, Task}` context of which v1 only ever populates `Core`. Nothing in the core assumes
@@ -904,15 +922,17 @@ than discovered later:
 
 ### 7.6 Network binding is an architectural invariant
 
-The bridge can `resume`, `reset`, and `mem_write`; a DAP client has complete control of the
-debugger. Exposure is therefore constrained by design, not by deployment habit:
+The bridge exposes target-mutating execution and breakpoint mechanisms within
+its verified allowlist. Reset and memory writes are not current supported
+operations. Even this narrower authority requires exposure to be constrained
+by design, not by deployment habit:
 
 | Channel | Binding |
 |---|---|
 | MBP control | random port on `127.0.0.1` / `::1` only |
 | hint (optional; not integrated into the runtime) | loopback UDP receiver/protocol seam, optionally with a per-session nonce |
-| DAP | loopback by default |
-| remote DAP | explicit opt-in, and requires a separate transport security design |
+| DAP | numeric loopback IP literal only |
+| remote DAP | unsupported; a future implementation needs a separate transport security design and explicit opt-in |
 
 Even if enabled in the future, a forged hint must trigger at most one `state()`; the nonce is the
 boundary that prevents cost-free flooding by any local process. The current strict breakpoint
@@ -960,7 +980,7 @@ re-downloads.
 
 ### 9.1 Daemon
 
-- CLion and VS Code start a local stdio `proxy`; Zed/other clients may use loopback TCP. Every
+- CLion, VS Code, and the Zed source extension start a local authenticated stdio `proxy`. Every
   supported frontend must send DAP **attach** and must not silently convert `launch` into target
   attachment.
 - exactly one DAP client at a time; a second attach is refused with a clear error rather
@@ -1092,7 +1112,7 @@ represented as a successfully cleaned session.
 | Warm bootstrap / unconfirmed `open` | **Never** send `close`; they do not prove multi-dap ownership of an existing MULTI session |
 | **Daemon duplicate or binding collision** | single-instance lock and record path keyed by the configured probe identity; matching semantics converge, while a same-ID record or startup marker with a different validated digest fails closed without reuse, deletion, authentication, or shutdown. This proves local configuration identity, not hardware serial identity |
 | **External probe contention** | a separate error class: the probe is held by a process multi-dap does not manage (a MULTI GUI, a stray target server). Detected from the target server's own failure, reported with evidence |
-| Leftover processes | detected at startup and **reported, not killed**; `doctor` prints executable paths and parent/child PIDs so a human decides |
+| Possible leftover processes | startup reports a bounded, count-only host observation on stderr, never kills or adopts a process; `doctor --processes` reports PID/parent-PID metadata and `--include-paths` explicitly includes private executable paths. Installation-path/name matches are advisory, not ownership or probe-contention proof; incomplete coverage remains explicit |
 | MULTI refused a command | bridge emits a stable `kind` and sanitized `message`; reserved `raw` remains empty; DAP error response carries no target diagnostic |
 | Illegal target state (resume before reset, when required) | refused in Debugger Core; nothing is sent to the bridge |
 | Timeout | only Go sets deadlines; the bridge sets none |
@@ -1183,27 +1203,26 @@ the preceding sections:
 | Milestone | Integrated scope | Explicitly uncommitted scope |
 |---|---|---|
 | **M2** | breakpoint/stop arbiter, owned breakpoint, stop-epoch/deduplication; state lock does not span `Set`/`Clear`, detach fence, and bounded retry per epoch; p12-validated `l f` source resolver and per-Resolve snapshot; direct DAP Set/Clear and native CLion synchronization on a stopped target | The transaction behavior above is primarily host/race evidence and does not replace M0-7; source breakpoints fail closed when any configured core lacks definitive `Presence`; actual hits await acceptance |
-| **M3** | top-level stack frame, one-level aggregate children, service snapshot paging, parser/snapshot/locator failure boundaries | variable type/paging is negotiated by client `initialize`; hover, format, and non-top-level frames fail closed |
+| **M3** | complete bounded stack rows, one-level aggregate children per expansion, service snapshot paging, parser/snapshot/locator failure boundaries | variable type/paging is negotiated by client `initialize`; locals/evaluation require confirmed top-frame selection; hover, format, and non-top-frame inspection fail closed |
 | **M4** | `next` and `stepIn` transport/control path for one configured core | multi-core requires an `ExecutionDomain` with complete before/after observation; it has no production executor and is refused before I/O; `stepOut` and run-to are unproven; p04 has not run |
 | **M5** | stopped/core-routed `readMemory`; RH850 `disassemble` (actual opcode bytes); stop-bound frame PC reference; CLion hardware acceptance at 8/32/128/256 lines | `writeMemory`, registers, nonzero `instructionOffset`, automatic pointer-variable memory references, and instruction-level stepping fail closed |
-| **M6** | config-bound `status`, `shutdown`, `diagnose`, and same-socket `proxy` upgrade; deterministic packaging; VS Code local proxy source extension; CLion 2026.2.1 Cidr DAP CMake Debug/framing/disconnect-false contract; and bounded native CLion hardware smoke | legacy `proxy --probe-id` is identity-only; breakpoint-hit and execution acceptance, VS Code GUI, Zed, and stopped-target hardware disconnect await acceptance |
+| **M6** | config-bound `status`, `shutdown`, offline `diagnose`, and same-socket `proxy` upgrade; deterministic packaging; VS Code source extension with actual synthetic Extension Host acceptance; registered Zed source extension with host tests and Wasm build; CLion 2026.2.1 Cidr DAP contract and bounded hardware smoke | legacy `proxy --probe-id` is identity-only; breakpoint-hit and execution acceptance, real-target/visual VS Code validation, actual Zed GUI/target validation, and stopped-target hardware disconnect await acceptance |
 
 The warm-session router host/port and primary ELF are runtime inputs to `serve`, not project TOML.
 Binding accepts only a window whose full path is unique in the Window Register, whose state is
 stable, and whose process information is nonempty; failure of any threshold is refused, with no
 fallback to a second router, cold reconnect, basename, or first window. This binding and the
 program-component topology of the two configured cores have passed on a stopped target. A read-only
-phase probe after the latest native CLion attempt shows that Window Register enumeration still
-succeeds, but the first debugger `GetProgram()` blocking `RunCommands` received no reply; the public
-interface has no call-level cancel/timeout. The current gate is therefore for an operator to restore
-command dispatch in that debugger window before continuing the Cidr smoke test.
+phase probe after the recorded native CLion attempt showed that Window Register enumeration
+succeeded, but the first debugger `GetProgram()` blocking `RunCommands` received no reply; the public
+interface has no call-level cancel/timeout. That historical window failure is not evidence that the
+same session still exists. Further Cidr hardware acceptance requires a currently selected session,
+working command dispatch, and operation-specific authorization.
 
 ## 13. Open questions
 
 - Breakpoint condition expressions: whether MULTI's expression subset matches what DAP
   clients emit is unverified.
-- Source path rewriting rules: build-machine paths versus local paths need a configuration
-  form. The canonical identity type is defined (§6.6); the rewriting rule is not.
 - Whether hiding the MULTI window (M0-3) has side effects on GUI-only commands beyond
   `python`.
 - Whether GUI-initiated reset/download can be detected reliably enough to report, or only
@@ -1228,7 +1247,7 @@ command dispatch in that debugger window before continuing the Cidr smoke test.
 | Handles invalid the moment execution resumes, keyed by session-global `StopEpoch`, with monotonic IDs | Matches DAP's suspended-state reference lifetime; monotonic IDs make stale references fail loudly instead of resolving to a different live object | Validity until the next stop; per-core epochs; resetting the ID allocator after each resume |
 | Go-generated opaque hint tokens | The command list needs an identity before MULTI assigns a handle; also keeps DAP concepts out of the bridge and avoids assuming MULTI handles are globally unique | Passing the MULTI breakpoint handle to the notifier |
 | UDP loopback for hints, separate from control TCP, with a session nonce (candidate) | If integrated in the future, it can avoid blocking the MULTI command loop; polling covers loss, and the nonce limits local flooding | Reusing the bridge's control connection for notifications |
-| Loopback-only binding as an architectural invariant | The bridge can resume, reset, and write memory; a DAP client has full debugger control | Treating listener exposure as a deployment concern |
+| Loopback-only binding as an architectural invariant | Supported execution and breakpoint mechanisms already confer target-mutating authority; reset and memory writes remain unsupported | Treating listener exposure as a deployment concern |
 | Cores as DAP threads, single-thread execution advertised false | Honest about the freeze group instead of simulating per-core control | Pretending per-thread stepping works |
 | MCP as a frontend above Debugger Core, gated by a control lease | Preserves the single-owner property; serialization alone does not prevent conflicting intent between two controllers | Hanging an MCP shim beside the DAP server on the same bridge; relying on the actor alone to arbitrate two frontends |
 | Inspection method group provisional until M0-4 | DAP's variable model is a lazy paged tree; freezing a flat contract now would lock in the wrong shape | Freezing the full method table before knowing what MULTI exposes |
