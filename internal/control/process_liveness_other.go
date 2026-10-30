@@ -5,12 +5,18 @@ package control
 import (
 	"errors"
 	"fmt"
+	"math"
 	"syscall"
 )
+
+const maximumProcessID = math.MaxInt32
 
 func processAlive(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, nil
+	}
+	if uint64(pid) > maximumProcessID {
+		return false, errors.New("PID exceeds the platform process-ID range")
 	}
 	err := syscall.Kill(pid, 0)
 	switch {

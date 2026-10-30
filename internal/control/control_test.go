@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -313,7 +314,18 @@ func TestRecoverStartingReclaimsOnlyDeadReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker, err := json.Marshal(startingRecord{Version: ProtocolVersion, State: "starting", ConfigDigest: testConfigDigest, InstanceID: instance, PID: int(^uint(0) >> 1)})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestControlLivenessHelperProcess$")
+	child.Env = append(os.Environ(), "MULTI_DAP_CONTROL_LIVENESS_CHILD=1")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := child.Process.Pid
+	if err := child.Wait(); err != nil {
+		t.Fatalf("reap owned liveness child: %v", err)
+	}
+	marker, err := json.Marshal(startingRecord{Version: ProtocolVersion, State: "starting", ConfigDigest: testConfigDigest, InstanceID: instance, PID: pid})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +342,44 @@ func TestRecoverStartingReclaimsOnlyDeadReservation(t *testing.T) {
 	}
 	if _, err := store.Load("probe-1"); !errors.Is(err, ErrNoRecord) {
 		t.Fatalf("Load(recovered reservation) error = %v, want no record", err)
+	}
+}
+
+func TestControlLivenessHelperProcess(t *testing.T) {
+	if os.Getenv("MULTI_DAP_CONTROL_LIVENESS_CHILD") == "1" {
+		os.Exit(0)
+	}
+}
+
+func TestRecoverStartingRejectsOutOfRangePIDWithoutRemovingMarker(t *testing.T) {
+	invalidPID := uint64(maximumProcessID) + 1
+	if invalidPID > uint64(^uint(0)>>1) {
+		return // This Go int cannot represent a PID wider than the platform API.
+	}
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := randomToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := json.Marshal(startingRecord{Version: ProtocolVersion, State: "starting", ConfigDigest: testConfigDigest, InstanceID: instance, PID: int(invalidPID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.recordPath("probe-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, marker, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if recovered, err := store.RecoverStarting("probe-1", testConfigDigest); recovered || err == nil {
+		t.Fatalf("RecoverStarting(out-of-range PID) = (%v, %v), want retained marker and error", recovered, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, marker) {
+		t.Fatalf("invalid PID changed the reservation: %v", err)
 	}
 }
 

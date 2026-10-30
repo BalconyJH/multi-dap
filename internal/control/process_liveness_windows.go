@@ -3,7 +3,9 @@
 package control
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"syscall"
 	"unsafe"
 )
@@ -12,6 +14,7 @@ const (
 	processQueryLimitedInformation = 0x1000
 	stillActive                    = 259
 	winErrorInvalidParameter       = syscall.Errno(87)
+	maximumProcessID               = math.MaxUint32
 )
 
 var (
@@ -24,6 +27,9 @@ var (
 func processAlive(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, nil
+	}
+	if uint64(pid) > maximumProcessID {
+		return false, errors.New("PID exceeds the platform process-ID range")
 	}
 	handle, _, callErr := openProcess.Call(processQueryLimitedInformation, 0, uintptr(uint32(pid)))
 	if handle == 0 {
