@@ -27,7 +27,10 @@ experiments live in [M0 findings](m0-findings.md).
 | Warm acquisition | `HARDWARE_OBSERVED` | Requires the runtime router address and an exact, unique, stable full-path program binding; no cold fallback. |
 | Session Actor and epochs | `IMPLEMENTED` | One actor serializes state; bridge I/O uses one executor; stale bridge/frontend generations and stale stop-scoped handles are rejected. |
 | Local control plane | `IMPLEMENTED` | Owner-only record, semantic configuration binding for config-based operations, authenticated `status`, `shutdown`, `diagnose`, and same-socket `proxy` upgrade. The legacy `proxy --probe-id` path is explicitly unbound. |
-| VS Code integration | `SOFTWARE_ONLY` | Source extension and host tests exist; a real VS Code GUI session remains unverified. |
+| [Performance timeline](performance.md) | `HARDWARE_OBSERVED` | Scripted config-bound capture on one stopped E2/MULTI 8.1.4 session completed ten requests and private Chrome Trace export without framing loss. This observes host DAP latency, not target CPU timing. Real-editor capture and observer overhead remain unverified. |
+| [Offline native analysis](native-analysis.md) | `SOFTWARE_ONLY` | Explicitly mapped Profiler CSV import and exact-version TimeMachine packet normalization. Physical-time trace export requires picosecond tags. No automatic vendor parser, snapshot parser, or hardware qualification is claimed. |
+| [Native TimeMachine requests](native-analysis.md#experimental-native-dap-requests) | `SOFTWARE_ONLY` | Optional MULTI 8.1.4/Python 3.8+ daemon-owned helper, actor fencing, explicit source and start/stop admission, bounded reads, and local recovery receipts are wired. `trace capture` reads one interval through an existing config-bound daemon without starting collection. Source association and actual DLL/session/probe behavior remain unqualified; no editor button is present. |
+| VS Code integration | `SOFTWARE_ONLY` | Source extension and host tests exist, including optional `perfOutput`/`perfMaxEvents` through the config-bound proxy. A real VS Code GUI session/capture remains unverified. |
 | [CLion integration](clion.md) | `HARDWARE_OBSERVED` | Primary supported IDE: native Cidr DAP attach, threads, source stacks, empty locals, evaluation, read-only M5 paths, and breakpoint synchronization were observed within the recorded scope. Actual breakpoint hit and full execution acceptance remain open. |
 | Zed integration | `UNSUPPORTED` | No registered adapter exists; the repository does not publish a misleading standalone `debug.json`. |
 
@@ -49,6 +52,7 @@ experiments live in [M0 findings](m0-findings.md).
 | `disassemble` | `PARTIAL` | Stopped-state RH850 forward disassembly; nonzero instruction offsets are rejected. |
 | `writeMemory` | `UNSUPPORTED` | Read-only inspection policy. |
 | Registers and instruction stepping | `UNSUPPORTED` | Not advertised and not wired. |
+| `multi-dap/trace/*` | `SOFTWARE_ONLY` | Seven experimental custom requests through the existing frontend owner/configuration barrier. Start and stop each require explicit authorization. Local status remains available after trace faults; no implied target execution, snapshot loading, RTOS routing, or hardware qualification. |
 | `disconnect` | `PARTIAL` | Detaches without reset, download, resume, halt, or session close. Requests to terminate or suspend the debuggee are rejected. Breakpoint cleanup remains bounded by stopped-state safety. |
 
 ## Verification state
@@ -65,6 +69,12 @@ The repository currently has automated host coverage for:
   embedded hashes, and reproducibility;
 - semantic configuration-digest coverage, same-ID mismatch rejection, and the
   parent/child `ensure` change-between-read fence.
+
+The [performance timeline](performance.md) has its own host-side framing,
+correlation, bounded-storage, redaction, and proxy/file integration tests.
+Those checks do not establish native runtime or real-editor capture
+acceptance. Separate helper/transport/controller/actor/DAP host tests cover
+the native request path, without loading a vendor DLL or operating a target.
 
 Separate local no-target observations on MULTI 8.1.4 confirmed debugger-module
 imports under embedded Python 3.8.6 and Python 2.7.3. The MBP handshake and bounded
@@ -89,6 +99,8 @@ qualification.
   claiming those integrations.
 - Implement and verify a multicore execution domain before enabling multicore
   stepping.
+- Qualify a versioned native profiling/trace input before adding target
+  performance views; see the [MULTI 8 adaptation study](ghs-8-adaptation.md).
 - Keep the legacy Python 2.7 compatibility surface small by extracting
   mechanism-only helpers while preserving the contract-tested policy boundary;
   Python 3 remains the default runtime.
