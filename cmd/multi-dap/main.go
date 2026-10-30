@@ -95,7 +95,7 @@ func main() {
 // runMain keeps diagnostics on the caller-owned stderr even if a command
 // installs a private console for a child process.
 func runMain(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	err := runWithIO(ctx, args, stdin, stdout)
+	err := runWithStreams(ctx, args, stdin, stdout, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "multi-dap:", err)
 	}
@@ -107,6 +107,10 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
+	return runWithStreams(ctx, args, stdin, stdout, io.Discard)
+}
+
+func runWithStreams(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError("command is required")
 	}
@@ -119,9 +123,9 @@ func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Wr
 	case "multi-version", "detect-multi-version", "discover":
 		return runMultiVersion(ctx, args[1:], stdout)
 	case "serve":
-		return runServe(ctx, args[1:], stdout)
+		return runServeWithDiagnostics(ctx, args[1:], stdout, stderr)
 	case "ensure", "start":
-		return runEnsure(ctx, args[1:], stdout)
+		return runEnsureWithDiagnostics(ctx, args[1:], stdout, stderr)
 	case "status":
 		return runStatus(ctx, args[1:], stdout)
 	case "shutdown":
@@ -132,7 +136,9 @@ func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Wr
 		return runProfile(ctx, args[1:], stdout)
 	case "trace":
 		return runTrace(ctx, args[1:], stdout)
-	case "doctor", "check":
+	case "doctor":
+		return runDoctor(ctx, args[1:], stdout)
+	case "check":
 		return runCheck(args[1:], stdout)
 	case "diagnose":
 		return runDiagnose(args[1:], stdout)
@@ -145,6 +151,10 @@ func runWithIO(ctx context.Context, args []string, stdin io.Reader, stdout io.Wr
 }
 
 func runServe(ctx context.Context, args []string, stdout io.Writer) (runErr error) {
+	return runServeWithDiagnostics(ctx, args, stdout, io.Discard)
+}
+
+func runServeWithDiagnostics(ctx context.Context, args []string, stdout, stderr io.Writer) (runErr error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "", "project TOML configuration")
@@ -275,6 +285,16 @@ func runServe(ctx context.Context, args []string, stdout io.Writer) (runErr erro
 	}()
 	startCtx, cancel := context.WithTimeout(ctx, validated.Timing.StartupDeadline)
 	defer cancel()
+	// The ensure parent reports its observation before discovery or child
+	// launch. Its hidden child must not repeat that scan after acquisition.
+	if !*ensureChild {
+		if err := reportStartupProcesses(startCtx, validated.Multi.Installation, stderr); err != nil {
+			return err
+		}
+	}
+	if err := startCtx.Err(); err != nil {
+		return err
+	}
 	runtime, err = startRuntime(startCtx, daemon.Options{Config: validated, BridgeScript: script, Warm: warm})
 	if err != nil {
 		return fmt.Errorf("start daemon: %w", err)
@@ -609,14 +629,14 @@ func targetStateName(state session.TargetState) string {
 }
 
 func runCheck(args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags := flag.NewFlagSet("check", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "", "project TOML configuration")
 	if err := flags.Parse(args); err != nil {
 		return usageError(err.Error())
 	}
 	if flags.NArg() != 0 {
-		return usageError("doctor accepts no positional arguments")
+		return usageError("check accepts no positional arguments")
 	}
 	validated, err := loadConfig(*configPath)
 	if err != nil {
@@ -769,5 +789,5 @@ type usageError string
 func (e usageError) Error() string { return string(e) + "\n" + usage() }
 
 func usage() string {
-	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n    [--perf-output <absolute-new.json> [--perf-max-events <1..100000>]] (requires --config)\n  multi-dap profile import --input <absolute.csv> --mapping <absolute.json> --output <absolute-new.json>\n  multi-dap trace capture --config <project.toml> --output <absolute-new-capture.json> --session-id <id> --source-id <id> --acknowledge-unverified-source\n    [--control-dir <path>] [--source-kind live|snapshot] [--core-id <id>] [--image-sha256 <digest>] [--snapshot-sha256 <digest>] [--start <uint64>] [--count <1..4096>]\n  multi-dap trace normalize --input <absolute-capture.json> --output <absolute-new.json> [--chrome-output <absolute-new-trace.json>]\n  multi-dap doctor|check --config <project.toml>\n"
+	return "usage:\n  multi-dap version|--version\n  multi-dap multi-version|detect-multi-version|discover (--config <project.toml> | --installation <multi-dir> [--executable <path>] [--expected-version <version>] [--allow-executable-probe])\n  multi-dap serve --config <project.toml> [--bridge-script <bridge.py>] [--control-dir <path>]\n    [--session-mode cold|warm] [--service-router-host <loopback-ip> --service-router-port <port> --primary-elf <path>]\n  multi-dap ensure --config <project.toml> [--acquisition warm --primary-elf <path> | --acquisition cold]\n    [--bridge-script <bridge.py>] [--control-dir <path>]\n  multi-dap status|shutdown|diagnose --config <project.toml> [--control-dir <path>]\n  multi-dap proxy (--config <project.toml> | --probe-id <id>) [--control-dir <path>]\n    [--perf-output <absolute-new.json> [--perf-max-events <1..100000>]] (requires --config)\n  multi-dap profile import --input <absolute.csv> --mapping <absolute.json> --output <absolute-new.json>\n  multi-dap trace capture --config <project.toml> --output <absolute-new-capture.json> --session-id <id> --source-id <id> --acknowledge-unverified-source\n    [--control-dir <path>] [--source-kind live|snapshot] [--core-id <id>] [--image-sha256 <digest>] [--snapshot-sha256 <digest>] [--start <uint64>] [--count <1..4096>]\n  multi-dap trace normalize --input <absolute-capture.json> --output <absolute-new.json> [--chrome-output <absolute-new-trace.json>]\n  multi-dap doctor|check --config <project.toml>\n  multi-dap doctor --config <project.toml> --processes [--include-paths]\n"
 }

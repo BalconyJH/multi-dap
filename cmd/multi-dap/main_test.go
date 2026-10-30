@@ -23,6 +23,7 @@ import (
 	"github.com/Tacrolimus/multi-dap/internal/core/session"
 	"github.com/Tacrolimus/multi-dap/internal/daemon"
 	"github.com/Tacrolimus/multi-dap/internal/dap"
+	"github.com/Tacrolimus/multi-dap/internal/hostprocess"
 	buildversion "github.com/Tacrolimus/multi-dap/internal/version"
 )
 
@@ -232,12 +233,13 @@ func TestServeWritesReadyAfterDaemonStartAndClosesOnCancellation(t *testing.T) {
 	t.Cleanup(func() { startRuntime = previous })
 	fake := newFakeRuntime()
 	var received daemon.Options
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	startRuntime = func(_ context.Context, options daemon.Options) (runtime, error) {
 		received = options
+		cancel()
 		return fake, nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	var output bytes.Buffer
 	if err := run(ctx, []string{"serve", "--config", configPath, "--bridge-script", bridgeScript, "--control-dir", t.TempDir()}, &output); err != nil {
 		t.Fatalf("run serve: %v", err)
@@ -271,12 +273,13 @@ func TestServePassesWarmSessionAsRuntimeOnlyState(t *testing.T) {
 	t.Cleanup(func() { startRuntime = previous })
 	fake := newFakeRuntime()
 	var received daemon.Options
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	startRuntime = func(_ context.Context, options daemon.Options) (runtime, error) {
 		received = options
+		cancel()
 		return fake, nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	var output bytes.Buffer
 	err := run(ctx, []string{
 		"serve", "--config", configPath, "--bridge-script", bridgeScript, "--control-dir", t.TempDir(),
@@ -970,6 +973,10 @@ func TestServeDoesNotStartRuntimeWhenControlRecordIsLive(t *testing.T) {
 }
 
 func TestEnsureReusesAuthenticatedDaemonWithoutDiscovery(t *testing.T) {
+	useProcessCollector(t, func(context.Context, string) hostprocess.Report {
+		t.Fatal("ensure scanned host processes while reusing an authenticated daemon")
+		return emptyProcessReport()
+	})
 	configPath := writeConfig(t)
 	controlDir := t.TempDir()
 	store, err := control.NewStore(controlDir)
@@ -1096,6 +1103,11 @@ func TestEnsureChildArgumentsKeepColdAndWarmAcquisitionSeparate(t *testing.T) {
 }
 
 func TestEnsureColdStartsOneChildWithoutWarmDiscovery(t *testing.T) {
+	observations := 0
+	useProcessCollector(t, func(context.Context, string) hostprocess.Report {
+		observations++
+		return emptyProcessReport()
+	})
 	configPath := writeConfig(t)
 	bridgeScript := filepath.Join(t.TempDir(), "bridge.py")
 	if err := os.WriteFile(bridgeScript, []byte("# test\n"), 0o600); err != nil {
@@ -1126,6 +1138,9 @@ func TestEnsureColdStartsOneChildWithoutWarmDiscovery(t *testing.T) {
 	launches := 0
 	launchEnsureServe = func(request ensureServeRequest) (ensureChild, error) {
 		launches++
+		if observations != 1 {
+			t.Fatalf("cold launch preceded its single process observation: %d", observations)
+		}
 		if request.Acquisition != ensureAcquisitionCold || request.Warm != nil {
 			t.Fatalf("cold launch request = %#v", request)
 		}

@@ -125,6 +125,14 @@ Run `.\multi-dap.exe help` for the complete command syntax. The bundle includes
 analysis commands below. Discovery, lifecycle, and target operations retain
 their separate documented authorization requirements.
 
+For a read-only Windows host-process report, use
+`doctor --config C:\private\project.toml --processes`. Executable paths remain
+hidden unless `--include-paths` is also supplied. A new `serve` or `ensure`
+may emit a count-only `host_process_notice` on stderr; ready stdout is unchanged.
+Partial or empty observations never establish process ownership or probe
+availability, and do not trigger termination, adoption, reconnect, or target
+operations. Plain `doctor` and `check` remain static configuration checks.
+
 Add bounded host-side recording to the existing editor's stdio proxy command:
 
 ```powershell

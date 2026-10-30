@@ -26,6 +26,11 @@ flowchart LR
 - Only one active DAP frontend owns the control lease.
 - The bridge exposes typed operations and sanitized failures. Raw target output
   must not be propagated into logs or terminal diagnostics by default.
+- Host process diagnostics use read-only, limited-query OS access. Executable
+  paths require an explicit `doctor --processes --include-paths` request;
+  automatic startup notices contain counts only. PID, parent PID, executable
+  name, and installation-path matches never authorize process control or prove
+  probe ownership. No command lines, environment variables, or modules are read.
 
 Loopback is a machine boundary, not a user boundary on every operating system.
 Run the daemon only on a trusted, single-user development host and keep the

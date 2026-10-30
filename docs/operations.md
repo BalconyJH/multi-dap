@@ -6,8 +6,10 @@ service, a shared daemon, or a process supervisor for Green Hills MULTI.
 ## Deployment baseline
 
 - Run the production daemon on a trusted Windows amd64 workstation.
-- Keep the release bundle intact so `multi-dap.exe` and `bridge/bridge.py`
-  remain adjacent. Source-tree runs must pass `--bridge-script` explicitly.
+- Keep the release bundle intact, including `bridge/bridge.py`,
+  `bridge/mbp_wire.py`, and the native trace companions beneath the executable.
+  Source-tree runs must pass `--bridge-script` explicitly and keep its sibling
+  helpers in the same directory.
 - Store the completed project TOML outside the repository with access limited
   to the operator.
 - Bind every endpoint to a numeric loopback address. Prefer port `0` unless an
@@ -56,12 +58,52 @@ before changing any runtime value. If a changed TOML produces
 configuration and shut the daemon down normally. Do not delete the record or
 use legacy `proxy --probe-id` to bypass the mismatch.
 
+## Read-only host process diagnostics
+
+Plain `doctor --config` remains the same static configuration check as `check`.
+To inspect related Windows host processes without opening MULTI or contacting
+a daemon or target, explicitly request a process report:
+
+```powershell
+multi-dap doctor --config C:\private\multi-dap-project.toml --processes
+multi-dap doctor --config C:\private\multi-dap-project.toml --processes --include-paths
+```
+
+The report identifies processes whose queried executable paths are beneath
+the configured MULTI installation. Known MULTI executable names whose paths
+cannot be verified are listed only as unresolved candidates. It includes
+point-in-time PID/parent-PID metadata, not an ownership decision. A parent PID
+may already have exited or been reused. Other installations and inaccessible
+processes limit coverage; zero matches never prove that a physical probe is
+available.
+
+Executable paths are private and omitted unless `--include-paths` is present.
+Command lines, environment variables, target data, tokens, and loaded modules
+are not collected. The report distinguishes complete, partial, unavailable,
+and unsupported observations. `config_checked: true` means only that TOML
+validation succeeded; both ownership and probe-availability verification remain
+false. Non-Windows hosts return an explicit unsupported inventory.
+
+Collection has entry/output bounds and checks a two-second cooperative deadline
+between local OS queries. An in-progress Windows query is not cancellable; no
+detached worker remains running after the command returns. This is a one-shot
+snapshot, not continuous process monitoring.
+
+Before a new `serve` or `ensure` acquisition, relevant or incomplete observations
+produce a count-only `host_process_notice` on stderr. The normal ready receipt
+on stdout does not change. An authenticated `already_ready` reuse does not
+repeat the scan. These notices do not reject a process by name, establish
+probe contention, adopt an existing process, or kill/reconnect anything. Use
+the explicit doctor report and operator session knowledge before deciding how
+to handle a possible leftover process.
+
 ## Failure handling
 
 | Observation | Operator action |
 |---|---|
 | `check` rejects the TOML | Correct the named validation problem before starting any session. |
 | `ensure` reports an existing authenticated daemon | Reuse it; do not start another process tree. |
+| Startup emits `host_process_notice` | Review `doctor --processes`; an observation is not proof of ownership or a free/contended probe. Never kill a PID from a stale snapshot. |
 | Warm discovery is ambiguous or empty | Restore the intended MULTI window/router state or correct the exact primary ELF. Do not switch to cold as an automatic recovery step. |
 | Bridge RPC times out | Treat that bridge generation as poisoned. Inspect `diagnose`; do not reuse a late reply. |
 | Actor reports reconciliation required | Preserve the target state and obtain operator review; do not issue speculative close or breakpoint cleanup. |

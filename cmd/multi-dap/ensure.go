@@ -49,6 +49,10 @@ type ensureServeRequest struct {
 }
 
 func runEnsure(ctx context.Context, args []string, stdout io.Writer) error {
+	return runEnsureWithDiagnostics(ctx, args, stdout, io.Discard)
+}
+
+func runEnsureWithDiagnostics(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("ensure", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("config", "", "project TOML configuration")
@@ -93,9 +97,15 @@ func runEnsure(ctx context.Context, args []string, stdout io.Writer) error {
 	} else if found {
 		return writeEnsure(stdout, "already_ready", status)
 	}
+	if err := reportStartupProcesses(startup, validated.Multi.Installation, stderr); err != nil {
+		return err
+	}
 	var warm *daemon.WarmSession
 	if mode == ensureAcquisitionWarm {
 		if err := prepareEnsureConsole(); err != nil {
+			return err
+		}
+		if err := startup.Err(); err != nil {
 			return err
 		}
 		discovered, err := discoverWarmSession(startup, validated, script, primary)
@@ -103,6 +113,9 @@ func runEnsure(ctx context.Context, args []string, stdout io.Writer) error {
 			return fmt.Errorf("discover warm MULTI session: %w", err)
 		}
 		warm = &discovered
+	}
+	if err := startup.Err(); err != nil {
+		return err
 	}
 	child, err := launchEnsureServe(ensureServeRequest{
 		ConfigPath: *configPath, BridgeScript: script, ControlDir: *controlDir,
