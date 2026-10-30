@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
-const publishedFiles = ['README.md', 'package.json', 'src/extension.js'];
+const publishedFiles = ['README.md', 'package.json', 'src/extension.js', 'src/native_capture.js'];
 
 for (const relativePath of publishedFiles) {
   const absolutePath = path.join(root, relativePath);

@@ -98,13 +98,27 @@ test('activation registers both the configuration provider and descriptor factor
         registrations.push({ kind: 'factory', type, factory });
         return { dispose() {} };
       },
+      registerDebugAdapterTrackerFactory(type, factory) {
+        registrations.push({ kind: 'tracker', type, factory });
+        return { dispose() {} };
+      },
+      onDidTerminateDebugSession() { return { dispose() {} }; },
+    },
+    commands: {
+      registerCommand(command) {
+        registrations.push({ kind: 'command', command });
+        return { dispose() {} };
+      },
     },
     window: { showErrorMessage() {} },
     workspace: { getConfiguration: () => ({ get: () => 'multi-dap' }) },
   };
   extension.activate({ subscriptions }, vscode);
-  assert.equal(subscriptions.length, 2);
-  assert.deepEqual(registrations.map((item) => [item.kind, item.type]), [['provider', 'multi-dap'], ['factory', 'multi-dap']]);
+  assert.equal(subscriptions.length, 7);
+  assert.deepEqual(registrations.map((item) => [item.kind, item.type || item.command]), [
+    ['provider', 'multi-dap'], ['factory', 'multi-dap'], ['tracker', 'multi-dap'],
+    ['command', 'multiDap.captureNativeTrace'], ['command', 'multiDap.inspectNativeTraceStatus'],
+  ]);
 });
 
 test('host capture is opt-in and never added by default', () => {
@@ -180,7 +194,10 @@ test('provider and descriptor enforce host capture admission before creating an 
         registrations.push(factory);
         return { dispose() {} };
       },
+      registerDebugAdapterTrackerFactory() { return { dispose() {} }; },
+      onDidTerminateDebugSession() { return { dispose() {} }; },
     },
+    commands: { registerCommand() { return { dispose() {} }; } },
     window: { showErrorMessage(message) { messages.push(message); } },
     workspace: { getConfiguration: () => ({ get: () => 'multi-dap' }) },
   };

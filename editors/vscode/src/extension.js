@@ -3,6 +3,7 @@
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { isIP } = require('node:net');
+const nativeCapture = require('./native_capture');
 
 const DEBUG_TYPE = 'multi-dap';
 const CONFIGURATION_SECTION = 'multiDap';
@@ -230,6 +231,15 @@ function activate(context, vscode = require('vscode'), executeFile = execFile) {
     vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, provider),
     vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, factory),
   );
+  nativeCapture.register(context, vscode, {
+    sessionError(session, output) {
+      const configuration = output === undefined ? session.configuration : { ...session.configuration, perfOutput: output };
+      return workspaceError(session.workspaceFolder) || configurationError(configuration);
+    },
+    executableForSession() {
+      return vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable');
+    },
+  });
 }
 
 function deactivate() {}

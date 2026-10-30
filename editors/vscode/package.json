@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node --check src/extension.js && node --check test/extension.test.js && node --check scripts/list-package-files.js",
+    "lint": "node --check src/extension.js && node --check src/native_capture.js && node --check test/extension.test.js && node --check test/native_capture.test.js && node --check scripts/list-package-files.js",
     "package-contents": "node scripts/list-package-files.js"
   },
   "keywords": [],
@@ -24,9 +24,31 @@
     "Debuggers"
   ],
   "activationEvents": [
-    "onDebug:multi-dap"
+    "onDebug:multi-dap",
+    "onCommand:multiDap.captureNativeTrace",
+    "onCommand:multiDap.inspectNativeTraceStatus"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "multiDap.captureNativeTrace",
+        "title": "multi-dap: Capture Existing Native Trace",
+        "icon": "$(save)"
+      },
+      {
+        "command": "multiDap.inspectNativeTraceStatus",
+        "title": "multi-dap: Inspect Native Trace Status"
+      }
+    ],
+    "menus": {
+      "debug/toolBar": [
+        {
+          "command": "multiDap.captureNativeTrace",
+          "when": "debugType == multi-dap && inDebugMode",
+          "group": "navigation"
+        }
+      ]
+    },
     "debuggers": [
       {
         "type": "multi-dap",
