@@ -11,12 +11,12 @@ have direct evidence.
 | Workstream | Required implementation | Acceptance evidence | Current state |
 |---|---|---|---|
 | Runtime selection | Version-bound Python 3 defaults and explicit legacy fallback. | Installation metadata, embedded-runtime checks, configuration-binding tests. | Existing implementation; retain its documented qualification limits. |
-| Host timeline | Transparent, private, bounded DAP observation and Chrome JSON export. | Framing, correlation, privacy, race, authenticated proxy, and consumer-import checks. | Scripted stopped E2/MULTI 8.1.4 capture passed ten requests and export validation. Synthetic output passed actual Perfetto UI import/SQL checks. Real-editor acceptance and observer overhead remain open. |
+| Host timeline | Transparent, private, bounded DAP observation and Chrome JSON export. | Framing, correlation, privacy, race, authenticated proxy, and consumer-import checks. | Scripted stopped E2/MULTI 8.1.4 capture passed ten requests and export validation. Actual VS Code Extension Host capture passed with a synthetic backend; synthetic output passed Perfetto UI import/SQL checks. Real-target/visual editor acceptance and observer overhead remain open. |
 | Profiler import | Explicit function/file/source/assembly/task hotspot or coverage import with exact field and unit semantics. | Vendor-produced export fixture, format/version provenance, invalid-input tests, and independent numerical comparison. | Explicit operator-mapped importer implemented; no qualified vendor fixture has been found yet. |
 | Native trace input | Typed versioned TimeMachine packet access, not deprecated file-API dependence or GUI scraping. | ABI sizes/offsets, exported functions, address width, packet kinds, timestamp units, and runtime compatibility. | Versioned decoder and native mechanism implemented. Actual DLL initialization was observed, but the standalone inventory was empty; live session/packet acceptance remains open. |
 | Target timeline | Normalize native function/context/event records with loss and clock-domain metadata. | Exact integer conversions, generation replacement, task attribution, unknown events, discontinuities, and known-workload comparison. | Offline packet normalization and picosecond Chrome export implemented; known-workload qualification remains open. |
 | Snapshot analysis | Explicit operator-selected snapshot workflow using a supported native interface. | License availability, source identity, documented load/save effects, and real snapshot acceptance. | Current 8.1.4 PDF save/load/version/content restrictions are rechecked. Adapter-visible loaded-entry binding, licensing behavior, and real fixtures remain open. |
-| Live capture | Actor-owned bounded collection and explicit start/stop authorization with recovery receipts. | Sole ownership, event pumping, cancellation/deadlines, generation fencing, recovery tests, and real target/probe evidence. | Experimental helper and seven requests are wired. The first selected-session open failed; local fault receipts and ordinary DAP isolation were observed. No packets were captured. MULTI-launched context/ownership and source binding remain open. No target mutation is authorized by this checklist. |
+| Live capture | Actor-owned bounded collection and explicit start/stop authorization with recovery receipts. | Sole ownership, event pumping, cancellation/deadlines, generation fencing, recovery tests, and real target/probe evidence. | Experimental helper and seven requests are wired. The first selected-session open failed; local fault receipts and ordinary DAP isolation were observed. No vendor packets were captured in that attempt. MULTI-launched context/ownership and source binding remain open. No target mutation is authorized by this checklist. |
 | RTOS tasks | Separate typed task inventory with unambiguous core/context routing. | Actual non-GUI response contract, identity/lifecycle tests, and RTOS target evidence. | Do not relabel configured DAP core threads as RTOS tasks. |
 | Registers/language | Verify usable read-only register and language-debug primitives before advertising support. | Vendor contract, stopped-state/epoch tests, supported runtime and target acceptance. | `regvalsave` is a documented export candidate, not a qualified per-core reader. Scalar display preservation has synthetic char/integer regressions; real bitfield/GRV fixtures and target evidence remain open. |
 
@@ -101,13 +101,16 @@ Remaining integration and qualification:
    File/ABI checks and fake helpers do not establish native behavior.
 2. Qualify snapshot loading, provenance and licensing independently. Declaring
    `sourceKind: "snapshot"` does not load or validate a snapshot.
-3. Validate the new config-bound `trace capture` CLI against an explicitly
-   selected real session. It already uses the documented DAP path with host
-   transcript tests; it does not start a daemon or collection. An editor
-   capture surface remains a separate product step.
-4. Complete real-editor and broader trace-consumer acceptance, including
-   observed timings, loss, and independent clock domains. Synthetic host and
-   native fixtures have passed actual Perfetto import/SQL checks.
+3. Validate the config-bound `trace capture` CLI and same-session VS Code native
+   capture command against an explicitly selected real session. Both use the
+   documented DAP path without starting a daemon or collection. The editor
+   command passed an actual Extension Host test with synthetic native packets,
+   one frontend, confirmed native close, and ordinary inspection afterward;
+   that does not establish vendor session behavior.
+4. Complete real-target/visual editor and broader trace-consumer acceptance,
+   including observed timings, loss, and independent clock domains. Actual
+   VS Code Extension Host capture passed with a synthetic backend; synthetic
+   host and native fixtures have passed actual Perfetto import/SQL checks.
 5. Obtain real Profiler, native stream, RTOS, and register fixtures and complete
    each target qualification gate. A stopped target alone does not prove OSA
    freeze mode or non-perturbing register access.

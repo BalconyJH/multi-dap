@@ -4,6 +4,219 @@ This index records sanitized, local verification evidence. Each section
 defines its own scope. It is an audit aid, not a claim that a public release,
 hosted workflow, or hardware qualification has occurred.
 
+## Completion audit and bounded host benchmark (2026-10-30)
+
+Two independent read-only audits checked the M0-M5 and native/M6 contracts
+against the current implementation and evidence. They found no further safe
+host-side feature gap after the process-diagnostic work. They did not find
+the overall objective complete: target measurements and verified primitives,
+vendor-produced fixtures and source identity, actual GUI acceptance, and
+reviewed hosted publication remain unproven.
+
+The retained candidate hash and all 367 files in its local source inventory
+matched at audit time. Read-only remote checks still found the same committed
+revision and failed hosted CI run, no branch protection/rulesets/environments,
+and no releases. No remote settings or Git state were changed. A search of
+the selected MULTI installation found no CSV, snapshot, or candidate trace/export
+files matching `.csv`, `.dsnap`, `.prof`, `.trace`, or `.tmd`; it was not a
+machine-wide search or proof that no such fixture exists elsewhere.
+
+The existing `BenchmarkRecorderRequestResponse` was then run five times with
+two-second samples on Windows amd64, Go 1.26.6, and an AMD Ryzen 7 8745H host.
+The serial benchmark reported 3038-3171 ns per small request/response pair
+(median 3091 ns), 808 B/pair, and 20 allocations/pair. It fixes the clock,
+reuses one retained event slot, and measures parser/correlation work only.
+It excludes clock-call cost, growth/overflow, concurrent forwarding, artifact
+export, editor traffic, and target effects. This does not close real-editor
+end-to-end or hardware observer-overhead qualification.
+
+The raw benchmark is `tmp/perf-host-benchmark-20261030.log`. No production
+code changed during this audit or measurement, and no vendor runtime or target
+was accessed.
+
+## Host process diagnostics and Linux race validation (2026-10-30)
+
+A completion audit found an unimplemented host-side architecture requirement:
+possible leftover processes were supposed to be reported, but `doctor` only
+performed the static `check` operation. The new explicit diagnostic fills that
+gap without replacing existing configuration checks or granting process/target
+control.
+
+| Check | Observed result and boundary |
+|---|---|
+| Windows inventory | Toolhelp snapshots and limited-query process image/timing calls identify installation-path matches and unresolved known-name candidates. Bounds, strict paths/UTF-16, cancellation, inaccessible identities, and snapshot/PID changes have host tests. A real owned harmless test child established its expected PID, parent PID, image path, and EOF cleanup. No vendor process was launched. |
+| Production CLI smoke | A freshly built CLI inspected an inert synthetic installation containing itself. Default output omitted image paths; explicit `--include-paths` identified its actual executable. The real machine snapshot remained `partial` because some process identities were inaccessible. Ownership/probe-availability flags remained false. No daemon, native collector, or target was used. |
+| CLI and startup integration | Twelve new regression groups cover static-output compatibility, explicit path opt-in, bounded/sanitized output, count-only stderr, configuration conflicts, startup ordering, cancellation, and reuse/child scan exclusion. Default `doctor`/`check` and the strict three-field ready receipt remain unchanged. Windows focused race checks passed twice. |
+| Independent review | A read-only security review found no material issue in the limited-query handles, path/coverage policy, privacy opt-in, startup ordering, cancellation, or preserved control-resource cleanup. Independent focused tests, race checks, and vet passed. Real PID reuse, clock jumps, and protected-process failures were not deliberately induced; failure policies use fake-snapshot tests. Stalled kernel-call timing remains unqualified and the deadline remains cooperative. |
+| Actual Linux race | WSL Ubuntu 24.04 with Linux Go 1.26.6 passed full uncached `go test -mod=readonly -race -count=1 ./...` and `go vet -mod=readonly ./...`, including the new inventory package and CLI integration. This closes the earlier local Linux race-tooling gap, not the hosted CI gate or Linux production support. |
+| Isolated C toolchain | GCC 13.3.0 and 29 official Ubuntu dependency packages were downloaded and extracted into an owned user-cache directory, not installed. Package SHA-256 values matched APT metadata; InRelease signatures and Packages hashes verified against the Ubuntu archive keyring. The system package-state hash was unchanged. Evidence uses the cached signed indexes, not a fresh repository-index update. |
+| Final Windows/editor regression | All 21 full Windows acceptance checks passed, with zero failures/skips. The official VS Code Insiders `1.145.0-insider` Extension Host again passed all five synthetic cases with the new CLI; each retained one authenticated proxy. Owned editor/fixture processes and control files were absent after cleanup. |
+| Workflow/security checks | actionlint passed and a fresh govulncheck scan found zero reachable vulnerabilities. The same one imported-package and thirteen required-module findings had no called vulnerable symbols. |
+
+Evidence is retained in `tmp/devstatus-acceptance-20261030-08.log`,
+`tmp/hostdiag-linux-race-20261030-07.log`,
+`tmp/vscode-editor-acceptance-AyotWK/result.json`, and its adjacent
+`verification.json`. The isolated-toolchain provenance and scripts are under
+`.hwscratch/linux-race/`; the actual CLI scan receipt is
+`.hwscratch/host-diagnostics-20261030/receipt.json`.
+
+Both accepted package builds and the retained candidate have SHA-256
+`99656c244e920529b3d11a43ca6c2b7c275fc4c57e99bfa63bdce3ce54701592`.
+The new retained archive is
+`tmp/devstatus-candidate-20261030-03/multi-dap-0.1.0-rc.1-windows-amd64.zip`.
+It supersedes the earlier local candidate for these host changes, without
+overwriting that candidate or its evidence. The provenance commit remains
+null; no commit, push, tag, publication, or remote setting change occurred.
+
+This remains host-software evidence. Process snapshots neither prove an
+available probe nor authorize killing, adopting, reconnecting, or operating a
+target. Current target configuration/authorization, vendor fixtures, visual
+editor acceptance, and reviewed hosted publication remain separate gates.
+
+## Same-session native editor capture and CI corrections (2026-10-30)
+
+This continuation implements the missing native editor capture surface and
+repairs the concrete Windows/Linux failures from hosted CI run `40999557048`
+at committed revision `f2db9f1fda297af2c7c008133a10c21b469b5b78`.
+No source was committed or pushed, and hosted CI has not rerun these changes.
+
+| Check | Observed result and boundary |
+|---|---|
+| Native editor path | The VS Code command uses only the existing configured DebugSession. A local `trace capture-editor` helper statically validates configuration, reserves exclusive private output, forwards bounded native status/open/poll/read/close requests, validates the capture, and requires confirmed native close plus terminal EOF before successful output. It does not acquire a daemon, create a frontend, start/stop collection, load a snapshot, or execute the target. |
+| Actual Extension Host | Official Insiders `1.145.0-insider`, commit `f8c98dc6a2efcf8e86977254e1d4cf56b2542dbc`, passed five synthetic cases: default attach, cold reuse, warm reuse, host capture, and native interval capture. Each case used exactly one authenticated proxy. The native case made no readiness probe or second initialize/attach and completed ordinary threads/evaluate afterward. |
+| Native artifact | The production Go normalizer accepted three synthetic packets and one 100-microsecond span. Generation `18446744073709551614` remained an exact decimal string across JavaScript IPC. This is not a vendor-produced packet fixture or source/core qualification. |
+| Native failure boundaries | All 48 Node tests passed, including 25 native-capture regressions. Host coverage includes bounded framing, nonce/request identity, exclusive output, source/generation/interval substitution, close/EOF validation, cancellation, session replacement, pending late replies, and retained reconciliation state. The original standalone capture lifecycle remains separately tested. |
+| Independent native review | Review reproduced a JS/Go close-receipt disagreement that could forget a reconciliation tombstone. The fix rejects contradictory last-receipt flags and retains uncertainty on any failed native attempt; independent regression review passed and a second capture remained blocked until an explicit clean status check. No other material security finding remained in the reviewed scope. |
+| Windows hosted failure | Aggregate-parser fixture mutations now normalize checkout line endings and exercise both LF and CRLF, with an explicit assertion that each malformed mutation changed its input. Parser admission was not relaxed. |
+| Linux hosted failures | Dead-reservation recovery uses an owned reaped process rather than an overflowing fake PID. Production liveness checks reject values beyond each OS PID width and retain ambiguous reservations. Full positive warm-start coverage remains Windows-specific; non-Windows tests require rejection of POSIX ELF identity before `open` and cleanup of the owned fake bridge. |
+| Independent CI review | A read-only review found no actionable issue in the PID bounds, reservation retention, line-ending fixtures, or split warm-start tests. Linux remains a host-test tier, not a supported production daemon platform. |
+| Actual Linux host validation | WSL Ubuntu with Linux Go 1.26.6 passed uncached full `go test -mod=readonly -count=1 ./...` and `go vet -mod=readonly ./...` after the Go editor helper changes. The successful run used the existing module cache without network fetches. Linux race was not run because this environment lacks a C compiler; Windows full acceptance covers race separately. |
+| Workflow and vulnerability checks | Locally rebuilt actionlint v1.7.12 passed. A fresh govulncheck v1.1.4 database scan found zero reachable vulnerabilities, with one noncalled imported-package and thirteen noncalled required-module findings. The audit does not cover Rust dependencies. |
+| Final Windows acceptance | After the close-receipt correction, all 21 full release-acceptance checks passed with zero failures or skips. This includes full Go/race, 98 bridge/native/helper tests, 87 reconnaissance tests, 48 Node tests, nine Zed tests plus lint/Wasm build, documentation/policy checks, standalone MULTI Python compilation, reproducible ZIPs, and WinGet manifest validation. |
+
+The final five-case editor report is
+`tmp/vscode-editor-acceptance-hkXvJP/result.json`. Its isolated acceptance uses
+the production proxy/DAP transport with a synthetic backend and inert vendor
+sentinel. It does not initialize a vendor native DLL or use hardware. Visual
+UI assessment, real native sessions, observer overhead, and target acceptance
+remain open.
+
+Linux evidence is `tmp/native-editor-linux-go1266-cached.log`; earlier failed
+shell/network attempts were not counted as passes. The workflow/vulnerability
+logs and tool provenance are under `tmp/*20261030-04*`. Both audit binaries
+reproduced byte-for-byte from their versioned cached source modules, and the
+module directory/ZIP hashes matched cached checksum-database records. These
+are local source builds, not upstream release executables. Full dependency
+graph verification was unavailable offline because unrelated test-dependency
+metadata was absent; it is not claimed as a successful check.
+
+The final full log is `tmp/devstatus-acceptance-20261030-06.log`. Both package
+builds and the retained local candidate have SHA-256
+`46b69b04ca2c175fde5ee3add81ad726dbe29c26264ce9efb41795febb480978`.
+The retained archive is
+`tmp/devstatus-candidate-20261030/multi-dap-0.1.0-rc.1-windows-amd64.zip`;
+its adjacent checksum and internal payload/provenance records identify this
+uncommitted candidate. The provenance commit is deliberately null. This is
+not a reviewed tagged release, a hosted CI result, a public publication, or
+hardware qualification.
+
+### Current bridge loader in the embedded runtime
+
+A separate bounded no-target run used the current `bridge.py` and exact
+sibling `mbp_wire.py` through the production MULTI 8.1.4 launch specification.
+It validated MBP v1, sent only `state`, received `session_not_open`, and closed
+the connection. There was no `open`, debugger-factory request, native collector
+request, or target operation in the transcript.
+
+The actual owned Python service loaded the selected installation's
+`python38.dll`. Its loaded-module path and file SHA-256 were recorded, and the
+file contained the Python `3.8.6` version constant. Six owned Job members were
+observed at the checkpoint. `mpythonrun` exited naturally after EOF; remaining
+owned services required explicit Job cleanup. Final snapshots found zero
+remaining observed owned PIDs or owned listeners and no unattributed related
+vendor process. A separate system console-host descendant was outside the
+Job and disappeared without a targeted action.
+
+Machine-wide `Win32_ProcessStartTrace` subscription was denied. The scoped
+receipt therefore records `bridge_runtime_pass` with
+`forensic_audit: unavailable`, `process_event_audit_available: false`, and
+`transient_activity_excluded: false`. Process/module snapshots are not proof
+that every transient activity was absent. Earlier harness failures and the
+original conservative `inconclusive` receipt remain retained; the supplemental
+receipt narrows its claim rather than overwriting them.
+
+Private evidence is under `.hwscratch/embedded-python-smoke/`, including
+`scoped-receipt-20261030T160321.json`, the process/module audit, and the original
+checkpoint/result/audit receipts. The wire companion SHA-256 is
+`99a8d4c09fc89294ff4b6ecfb63c168230c6fdfdb158759afa95356f92a803df`.
+These observations verify the current loader and pre-open MBP behavior only.
+They do not close resident-loop MULTI calls, differential polling, acquisition,
+native-session, or hardware qualification.
+
+## Editor integration and bridge decomposition (2026-10-30)
+
+This continuation closes the mechanism-helper extraction and Zed source-adapter
+implementation items, and adds actual VS Code Extension Host evidence. It
+does not close the remaining target, native-input, Zed GUI, or publication gates.
+
+| Check | Observed result and boundary |
+|---|---|
+| Legacy bridge helper | The exact sibling `mbp_wire.py` owns Python 2/3 conversion and bounded framing. Loader tests reject missing/corrupt helpers and ignore poisoned cwd/module-cache candidates. Host Python 3.12 ran 98 bridge/native/helper tests; standalone MULTI Python 3.8.6 ran 44 bridge tests and Python 2.7 ran six wire/loader tests. No embedded debugger or target was opened. |
+| Frame boundary regression | Exact-limit payloads followed by split CRLF are accepted consistently with a single-read delimiter. Extra payload, incomplete framing, and malformed UTF-8/JSON remain rejected. |
+| Companion distribution | Archive copy/allowlists, internal hashes, source equality, publication/staging comparisons, installed companion validation, and embedded-runtime compilation include the new helper. An independent security review found no material issue in this scope. |
+| Actual VS Code host | Official VS Code Insiders `1.144.0-insider`, commit `58173d0ebc1838579e3c331e0a47e365904a6456`, loaded the production extension in an isolated profile. Four sessions passed through the real authenticated control server, production proxy, and DAP server with a synthetic backend. |
+| Attach and explicit reuse | Default attach opened one authenticated proxy and made zero readiness probes. Cold and warm reuse each opened one proxy and made one readiness probe. Initialize/attach/configurationDone, threads, stack, scopes, variables, evaluate, and disconnect passed. This exercised reuse of a ready synthetic daemon, not actual MULTI acquisition. |
+| Capture and cleanup | The fourth real-host session produced twelve completed requests and eighteen trace events, zero framing errors/unfinished requests, and `capture_complete:true`. Its metadata was `finalization_boundary:"disconnect_response"` and `proxy_exit_observed:false`. Cleanup found no fixture control records or acceptance-owned editor/fixture/proxy processes. |
+| Editor-discovered correction | The original capture file remained empty when VS Code terminated the adapter after disconnect while stdin stayed open. The proxy now syncs/closes the capture before forwarding the complete matched successful response. A real child-process kill regression confirms the file survives immediate termination; failed/ambiguous responses do not finalize early. Later bytes still forward, and a durable artifact is never rewritten. |
+| Zed source extension | The adapter manifest, strict schema, SDK 0.7.0 hooks, Windows stdio admission, and empty DAP attach body are implemented. Nine native tests, clippy, formatting, and a locked offline `wasm32-wasip2` release build passed. Real Zed installation and GUI/target operation were not exercised. |
+| Zed dev-builder correction | Review found that installing Rust 1.95.0 did not select it for Zed's plain `cargo` invocation. The extension-local toolchain file now pins 1.95.0 and the Wasm target. `rustup show active-toolchain` confirmed the directory override; plain `cargo build` from that directory passed. |
+| Final release gate | The updated full acceptance script passed all 21 checks, with zero failures/skips, including the new offline Zed source/Wasm check. actionlint v1.7.12 passed for the updated CI, release, publication, and package-manager workflows. |
+| Go vulnerability audit | A fresh govulncheck v1.1.4 live-database scan of the final Go sources found zero reachable vulnerabilities. One imported-package and thirteen required-module findings had no called vulnerable symbols. This scan does not cover the separate Rust dependency graph. |
+
+Both final Windows package builds had SHA-256
+`4a78c765e3106527efebc2ff243e9a63c9bf08674535353204d3294855bbb299`.
+The separately compiled Zed Wasm artifact had SHA-256
+`4d479367c0fd73b823320df3f49e50252d57309f88b188188a06876ebabe50c6`;
+it is not part of the Windows ZIP or a published extension.
+
+Ignored local evidence is in `tmp/devstatus-acceptance-20261030-03.log` and
+`tmp/vscode-editor-acceptance-7ybd8l/result.json`. The editor fixture uses
+synthetic data and an inert vendor-executable sentinel; no vendor runtime,
+native DLL, hardware access, image preparation, or target execution occurred.
+The actual editor checks are not a visual UI assessment, an observer-overhead
+measurement, or a native trace qualification.
+
+## Development-status completion pass (2026-10-30)
+
+This pass advances the host implementation and reconciles the published status
+with actual production wiring. The milestone exit gates in
+[capabilities](capabilities.md#open-hardware-and-product-work) remain open where
+they require target, native-runtime, editor GUI, or publication evidence.
+
+| Change | Verification and boundary |
+|---|---|
+| Queued execution ownership | Deterministic actor regressions cover continue, pause, next, and step-in across detach, release, and same-owner reacquisition. Dispatch checks the original control generation and current admission gate. Already dispatched operations retain their existing lifecycle contract. |
+| Breakpoint mutation and cleanup | Direct and source-resolved replacements require the original control generation and stopped epoch. Empty replacements are also stopped-only. A newer running/stop observation prevents queued Clear; pending records survive for the next natural stop. |
+| Post-execution observations | Stopped-only M3/M5 and breakpoint work refresh state after execution dispatch. Running, changed-epoch, refused, and all five unknown lifecycle states cannot reuse the old stopped snapshot. Unknown states retain the freshness requirement and do not create an automatic cleanup retry loop. Host regressions cover bounded refresh, retained records, and later recovery. |
+| M3 frame and snapshot integrity | Read-only selected-frame guards precede locals, evaluation, and aggregate expansion. Stack rows for callers remain available without a falsely attributed live PC. Duplicate indices/multiple selections and invalid off-page source mappings fail before paged handle allocation. |
+| VS Code acquisition | All 23 Node host tests, lint, and package-content checks pass. Tests cover local workspace/path admission, explicit cold/warm arguments, success ordering, sanitized failures, and real harmless child-process timeout/output overflow. Default attach remains proxy-only; no GUI or target acquisition was exercised. |
+| Architecture scan | Nested Go modules, including private source snapshots, are excluded consistently with `go test ./...`; ordinary adapter sources remain checked. |
+| Independent reviews | M3 and VS Code security reviews found no material issue. Actor review identified the unknown-state freshness defect; the fix passed independent repeated race review before final acceptance. |
+| Full local release acceptance | The final run after the actor correction passed all 20 checks, with zero failures and zero skips. It includes Go test/vet/build/race, Python host checks, standalone MULTI Python 3.8.6 compilation, editor/policy checks, strict documentation, reproducible packages, and WinGet manifest validation. |
+| Additional security/workflow checks | actionlint v1.7.12 passed. govulncheck v1.1.4 completed a live-database scan with zero reachable vulnerabilities; it reported one imported-package and thirteen required-module findings without called vulnerable symbols. The initial module-proxy requests timed out; exact-version sources already in the local module cache were built and used for these checks. |
+
+Both final Windows acceptance builds had SHA-256
+`13510dddab901d5816f87f410af4cd850c4be5a1ccca035f12f8a6ae19214ec5`.
+This identifies the locally tested uncommitted candidate, not a published or
+hardware-qualified release. The ignored full log is
+`tmp/devstatus-acceptance-20261030-02.log`.
+
+No target operation, MULTI acquisition, vendor DLL initialization, package
+installation, or publication was performed. In particular, the new read-only
+frame guards and state refresh ordering still need real MULTI timing and
+editor regression. All multicore execution, including continue and pause,
+remains disabled until a production execution-domain executor is qualified.
+
 ## E2 reconnect and scripted DAP acceptance (2026-10-29)
 
 The operator authorized disconnect/reconnect and subsequently authorized
