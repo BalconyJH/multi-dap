@@ -162,6 +162,22 @@ func TestParseStackAcceptsCapturedUnsourcedNormalizedFrame(t *testing.T) {
 	}
 }
 
+func TestParseStackRejectsAmbiguousFrameIdentity(t *testing.T) {
+	for _, malformed := range []string{
+		"0_ main()\n0  caller()\n",
+		"0_ main()\n1_ caller()\n",
+		"7  main\t[X:/fixture/main.c:7,1]\n7  caller()\n",
+	} {
+		if _, err := ParseStack(malformed); !errors.Is(err, ErrInspectionFormat) {
+			t.Fatalf("ParseStack(%q) error = %v, want ErrInspectionFormat", malformed, err)
+		}
+	}
+	frames, err := ParseStack("0  main()\n7_ caller()\n")
+	if err != nil || len(frames) != 2 || frames[1].Index != 7 || !frames[1].Selected {
+		t.Fatalf("non-contiguous caller-selected stack = (%#v, %v)", frames, err)
+	}
+}
+
 func TestParseProgramCounter(t *testing.T) {
 	address, err := ParseProgramCounter("$pc = 0x00000000\n")
 	if err != nil || address != 0 {

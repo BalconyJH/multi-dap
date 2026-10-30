@@ -50,6 +50,8 @@ func ParseStack(output string) (frames []StackFrame, err error) {
 	if err != nil {
 		return nil, err
 	}
+	indices := make(map[uint64]struct{})
+	selected := false
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -65,7 +67,17 @@ func ParseStack(output string) (frames []StackFrame, err error) {
 		if !ok {
 			return nil, fmt.Errorf("parse stack: invalid frame index")
 		}
+		if _, exists := indices[index]; exists {
+			return nil, fmt.Errorf("parse stack: duplicate frame index")
+		}
+		indices[index] = struct{}{}
 		frame := StackFrame{Index: index, Selected: match[2] == "_"}
+		if frame.Selected {
+			if selected {
+				return nil, fmt.Errorf("parse stack: multiple selected frames")
+			}
+			selected = true
+		}
 		if len(match) == 4 {
 			frame.Function = match[3] + "()"
 			frames = append(frames, frame)
