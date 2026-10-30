@@ -1,8 +1,30 @@
 # GitHub Repository Configuration
 
 Repository files define the build and publication logic, but GitHub-side access
-controls complete the release trust boundary. The repository is public; apply
-and verify this checklist before publishing any release.
+controls complete the release trust boundary. Apply and verify this checklist
+against the actual destination before publishing any release.
+
+## Current hosted readiness (2026-10-30)
+
+Read-only inspection found the local `origin` and live public repository at
+`BalconyJH/multi-dap`, with default branch `master`. The source module,
+package-manager identity, and existing release documentation still name
+`Tacrolimus/multi-dap` / `Tacrolimus.multi-dap`; the former repository did not
+resolve through the GitHub API. This identity mismatch must be resolved in a
+reviewed release decision, not by silently changing the remote, module path,
+or package identifier.
+
+The live default branch was not protected, the repository had no rulesets or
+protected environments, and immutable releases were disabled. Consequently,
+the required `release` and `production` environment controls and production
+acknowledgements are not established. No releases were returned. The latest
+hosted CI run for the current committed revision failed its Windows and Linux
+Go jobs, so local acceptance does not close the hosted gate.
+
+These are observations of the checked destination, not changes to its
+settings. The implementation and verification work is recorded in the
+[evidence index](verification-evidence.md). Keep publication gated until the
+identity, reviewed source, hosted CI, and controls below are all verified.
 
 ## Repository identity and visibility
 
@@ -32,7 +54,7 @@ Protect the default branch with:
 - blocked force pushes and deletion;
 - a narrowly controlled bypass list.
 
-Require these nine CI checks after their first successful hosted run records
+Require these eleven CI checks after their first successful hosted run records
 the exact names:
 
 - `Go (ubuntu-24.04)`;
@@ -40,6 +62,8 @@ the exact names:
 - `Python host tests (ubuntu-24.04)`;
 - `Python host tests (windows-2025)`;
 - `VS Code extension`;
+- `Zed source extension (ubuntu-24.04)`;
+- `Zed source extension (windows-2025)`;
 - `Documentation`;
 - `Go vulnerability audit`;
 - `GitHub Actions policy`;
