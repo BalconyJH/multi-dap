@@ -296,19 +296,38 @@ func TestParseAggregate(t *testing.T) {
 		t.Fatalf("ParseAggregate(assigned) = (%#v, %v)", got, err)
 	}
 
-	fixture := golden(t, "aggregate.txt")
-	for _, malformed := range []string{
-		strings.Replace(fixture, "sampleTag = 101;", "sampleTag = 101", 1),
-		strings.Replace(fixture, "spares[0]", "spares[index]", 1),
-		strings.Replace(fixture, "spares[0]", "sp\u00e4res[0]", 1),
-		strings.Replace(fixture, "    };\n    items[1]", "    }\n    items[1]", 1),
-		"struct Root {\n    member = struct Child {\n        nested = struct Grandchild {\n            leaf = 1;\n        };\n    };\n}\n",
-		"root = struct Root {\n    member = 1;\n} anotherRoot\n",
-		"root = struct Root {\n    member = 1;\n}\n",
-	} {
-		if _, err := ParseAggregate(malformed); err == nil {
-			t.Fatal("ParseAggregate accepted malformed fixture")
-		}
+	fixture := strings.ReplaceAll(golden(t, "aggregate.txt"), "\r\n", "\n")
+	for _, ending := range []struct{ name, text string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
+		t.Run(ending.name, func(t *testing.T) {
+			if _, err := ParseAggregate(strings.ReplaceAll(fixture, "\n", ending.text)); err != nil {
+				t.Fatalf("ParseAggregate valid fixture: %v", err)
+			}
+			for _, mutation := range []struct{ name, before, after string }{
+				{"missing scalar terminator", "sampleTag = 101;", "sampleTag = 101"},
+				{"non-numeric index", "spares[0]", "spares[index]"},
+				{"non-ASCII member", "spares[0]", "sp\u00e4res[0]"},
+				{"missing aggregate terminator", "    };\n    items[1]", "    }\n    items[1]"},
+			} {
+				t.Run(mutation.name, func(t *testing.T) {
+					malformed := strings.Replace(fixture, mutation.before, mutation.after, 1)
+					if malformed == fixture {
+						t.Fatal("test mutation did not alter the fixture")
+					}
+					if _, err := ParseAggregate(strings.ReplaceAll(malformed, "\n", ending.text)); err == nil {
+						t.Fatal("ParseAggregate accepted malformed fixture")
+					}
+				})
+			}
+			for _, malformed := range []string{
+				"struct Root {\n    member = struct Child {\n        nested = struct Grandchild {\n            leaf = 1;\n        };\n    };\n}\n",
+				"root = struct Root {\n    member = 1;\n} anotherRoot\n",
+				"root = struct Root {\n    member = 1;\n}\n",
+			} {
+				if _, err := ParseAggregate(strings.ReplaceAll(malformed, "\n", ending.text)); err == nil {
+					t.Fatal("ParseAggregate accepted malformed aggregate")
+				}
+			}
+		})
 	}
 }
 
