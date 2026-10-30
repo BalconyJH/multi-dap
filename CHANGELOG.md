@@ -24,8 +24,12 @@ version is tagged.
 ### Fixed
 
 - MULTI component inventories accept comma-separated PID/core aliases without
-  treating them as program bindings. Exact routed ELF identity checks remain
-  mandatory, and ambiguous aliases fail closed.
+  treating them as program bindings, including observed 8.1.4 name-first
+  ordering. Ambiguous display tails remain intact and explicitly marked;
+  exact routed ELF identity checks remain mandatory.
+- Evaluation accepts the observed single-line bare decimal integer response
+  from MULTI 8.1.4 without numeric conversion, inferred type/address, or
+  broader locals parsing. Diagnostics and unsupported text still fail closed.
 - Bridge inspection accepts Python 2 byte-string component names while
   preserving strict route validation.
 - Direct Windows `serve` repairs invalid stdout and stderr console handles
