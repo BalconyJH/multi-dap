@@ -21,6 +21,7 @@ class RepositoryLanguageTests(unittest.TestCase):
         self.assertTrue(is_relevant_text_file("go.sum"))
         self.assertTrue(is_relevant_text_file(".github/CODEOWNERS"))
         self.assertTrue(is_relevant_text_file("editors/vscode/.vscodeignore"))
+        self.assertTrue(is_relevant_text_file("editors/zed/src/lib.rs"))
         self.assertTrue(is_relevant_text_file("LICENSE"))
         self.assertFalse(is_relevant_text_file("assets/example.png"))
         self.assertFalse(is_relevant_text_file("bin/multi-dap.exe"))

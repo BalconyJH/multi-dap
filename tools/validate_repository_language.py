@@ -29,6 +29,7 @@ TEXT_EXTENSIONS = frozenset(
         ".mod",
         ".ps1",
         ".py",
+        ".rs",
         ".sh",
         ".sql",
         ".sum",
