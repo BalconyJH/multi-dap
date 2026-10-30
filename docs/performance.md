@@ -64,9 +64,11 @@ For the source VS Code extension, the attach configuration can explicitly set
 The path must be absolute after variable substitution, and `perfMaxEvents`
 requires an explicit output. Neither property is inserted by default. The
 extension passes separate arguments to the same authenticated proxy; it does
-not read tokens, create the file, start a daemon, or issue native trace
+not read tokens, create the file, or issue native trace
 commands. The Go proxy retains exclusive/private-file enforcement. These
-options have host tests; a real VS Code capture remains unverified.
+options passed real VS Code Insiders Extension Host capture with a synthetic
+backend. Actual target capture through that editor and observer overhead remain
+unverified. Explicit `acquisition` is a separate optional extension setting.
 
 ## Completion and file handling
 
@@ -75,10 +77,18 @@ created with an owner-only access control list; on other platforms it is created
 with mode `0600`. Choose an existing private directory outside the source tree.
 The file is written through the same open handle, not reopened by pathname.
 
-The trace is finalized when the proxy returns after normal stream completion,
-an error, or cooperative cancellation. The normal proxy half-close behavior
-still drains the other direction. Abrupt process termination, a host crash,
-or a filesystem failure can leave an empty or incomplete file; a reserved file
+When a complete, correlated, successful DAP disconnect response is observed,
+the proxy writes, syncs, and closes the capture before forwarding the response's
+final bytes to the editor. This preserves the file when the editor terminates
+its adapter immediately after disconnect. Failed, unmatched, mismatched, or
+ambiguous responses cannot trigger this boundary. Subsequent protocol bytes
+still pass unchanged, but are outside the capture interval.
+
+Otherwise the trace is finalized when the proxy returns after normal stream
+completion, an error, or cooperative cancellation. The normal proxy half-close
+behavior still drains the other direction. The file is never rewritten after
+finalization. Abrupt termination before either boundary, a host crash, or a
+filesystem failure can leave an empty or incomplete file; a reserved file
 alone is not evidence of a successful capture.
 
 Stdout remains DAP-only. The JSON file is the performance artifact; it is never
@@ -122,13 +132,18 @@ The summary in `otherData` includes:
 - bounded-pending, duplicate/out-of-order request, unmatched response, command
   mismatch, framing, and disabled-observer indicators;
 - `proxy_failed`, `capture_complete`, and per-command `request_summary`
-  latency and outcome totals.
+  latency and outcome totals;
+- `finalization_boundary`: `disconnect_response` or `proxy_exit`, and
+  `proxy_exit_observed`, which is false for a disconnect-boundary capture.
 
 `capture_complete` describes the **proxy observation**, not target trace
 coverage or successful target execution. Inspect the loss and error counters
 before using any latency summary. A DAP failure response is different from a
 failed proxy transport, and an unmatched or unfinished request has no fabricated
-duration.
+duration. A disconnect-boundary artifact describes observations through that
+response, including any pending/loss indicators; it does not claim a later
+transport outcome. Later proxy errors are still returned by the command, but
+cannot modify the already durable capture.
 
 ## Bounds and failure isolation
 
@@ -149,6 +164,24 @@ deciding whether the conversation is valid.
 Observation adds bounded host-side parsing and bookkeeping overhead. It is not
 an overhead-free measurement, and no claim is made that its cost is negligible
 for every workload.
+
+### Host parser microbenchmark
+
+The existing serial request/response benchmark can be run without an editor,
+daemon, MULTI, or target:
+
+```powershell
+go test -mod=readonly -run '^$' -bench '^BenchmarkRecorderRequestResponse$' -benchmem -count=5 -benchtime=2s ./internal/perf
+```
+
+On one Windows amd64 host with Go 1.26.6, five runs measured
+3.038-3.171 microseconds per small `threads` request/response pair, with a median
+of 3.091 microseconds, 808 bytes allocated, and 20 allocations per pair.
+The benchmark uses a fixed clock and reuses one retained event slot. It does
+not measure actual clock queries, growing buffers, concurrent forwarding,
+large payloads, private-file synchronization/export, editor latency, or target
+effects. These local numbers are not an end-to-end overhead budget or a
+cross-machine performance guarantee; see the [evidence index](verification-evidence.md).
 
 ## What is deliberately excluded
 
@@ -184,8 +217,9 @@ v59.1-1e9c61e98. Its SQL processor preserved the expected request/event names
 and microsecond-to-nanosecond conversion. A separate synthetic native trace
 also passed import and raw timestamp-string checks; see
 [verification evidence](verification-evidence.md#trace-consumer-import-2026-10-28).
-This does not substitute for a real editor's capture or measured observer
-overhead.
+This consumer-import evidence is separate from the synthetic Extension Host
+capture described below and does not establish real-target editor capture or
+measured observer overhead.
 
 A scripted capture against a stopped E2/MULTI 8.1.4 session was observed on
 2026-10-29. After two narrowly scoped MULTI text-parser fixes, all ten requested
@@ -195,6 +229,10 @@ capture path only; it adds no target CPU timing or native trace claim.
 The [verification evidence](verification-evidence.md) records the failed native
 open separately and documents normal test-daemon cleanup.
 
-No vendor trace parser, on-target workload, or real editor performance-capture
-acceptance is implied by this feature. The research and remaining capability
+An isolated VS Code Insiders 1.144.0-insider Extension Host captured twelve completed
+requests and eighteen events through the production authenticated proxy against
+a synthetic backend. The file was durable before the disconnect reply reached
+the editor, with no framing errors or unfinished requests. This is actual
+editor/host integration evidence, not a vendor trace parser, on-target workload,
+visual UI, or observer-overhead qualification. The remaining native capability
 gates are listed in [MULTI 8 adaptation](ghs-8-adaptation.md).

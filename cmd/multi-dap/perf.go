@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Tacrolimus/multi-dap/internal/control"
 	"github.com/Tacrolimus/multi-dap/internal/perf"
@@ -45,8 +46,55 @@ func runPerfProxy(ctx context.Context, record control.Record, options proxyPerfO
 	if err != nil {
 		return fmt.Errorf("performance capture: create output: %w", err)
 	}
-	proxyErr := control.Proxy(ctx, record, io.TeeReader(input, recorder.ClientWriter()), io.MultiWriter(recorder.ServerWriter(), output))
-	return finishPerfTrace(file, recorder.Finish(proxyErr != nil), proxyErr)
+	capture := &proxyPerfCapture{file: file, recorder: recorder}
+	proxyErr := control.Proxy(ctx, record, io.TeeReader(input, recorder.ClientWriter()), proxyPerfWriter{capture: capture, output: output})
+	return capture.finish(proxyErr)
+}
+
+type proxyPerfCapture struct {
+	mu       sync.Mutex
+	file     *os.File
+	recorder *perf.Recorder
+	finished bool
+	err      error
+}
+
+func (c *proxyPerfCapture) finishDisconnect() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.finished {
+		return
+	}
+	trace, ready := c.recorder.FinishOnDisconnect()
+	if !ready {
+		return
+	}
+	// The editor may terminate this process as soon as it receives the
+	// disconnect response. Sync and close before forwarding its final bytes,
+	// and never rewrite a durable capture after that observable boundary.
+	c.finished = true
+	c.err = finishPerfTrace(c.file, trace, nil)
+}
+
+func (c *proxyPerfCapture) finish(proxyErr error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.finished {
+		c.finished = true
+		c.err = finishPerfTrace(c.file, c.recorder.Finish(proxyErr != nil), nil)
+	}
+	return errors.Join(proxyErr, c.err)
+}
+
+type proxyPerfWriter struct {
+	capture *proxyPerfCapture
+	output  io.Writer
+}
+
+func (w proxyPerfWriter) Write(data []byte) (int, error) {
+	_, _ = w.capture.recorder.ServerWriter().Write(data)
+	w.capture.finishDisconnect()
+	return w.output.Write(data)
 }
 
 func finishPerfTrace(file *os.File, trace perf.Trace, proxyErr error) error {

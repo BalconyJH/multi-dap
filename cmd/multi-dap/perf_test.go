@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -233,6 +234,200 @@ func TestPerfProxyCLionSessionAddsNoBackendActions(t *testing.T) {
 	}
 	if strings.Contains(encoded, "private-unsupported-command") {
 		t.Fatal("arbitrary command name escaped the recorder allowlist")
+	}
+}
+
+func TestPerfProxyDisconnectCapturePrecedesReplyWithOpenInput(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		t.Run(fmt.Sprint(success), func(t *testing.T) {
+			response := perfFrame(fmt.Sprintf(`{"seq":1,"type":"response","request_seq":1,"command":"disconnect","success":%t}`, success))
+			trailing := perfFrame(`{"seq":2,"type":"event","event":"terminated"}`)
+			completeResponse := make(chan struct{})
+			configPath, controlDir := perfProxyFixture(t, func(ctx context.Context, connection net.Conn) error {
+				if _, err := dap.NewDecoder(connection).Decode(); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(connection, response[:len(response)-1]); err != nil {
+					return err
+				}
+				select {
+				case <-completeResponse:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				_, err := io.WriteString(connection, response[len(response)-1:]+trailing)
+				return err
+			})
+			path := filepath.Join(t.TempDir(), "editor-trace.json")
+			input, inputWriter := io.Pipe()
+			output, outputWriter := io.Pipe()
+			defer input.Close()
+			defer inputWriter.Close()
+			defer output.Close()
+			defer outputWriter.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				err := runProxy(ctx, []string{
+					"--config", configPath, "--control-dir", controlDir, "--perf-output", path,
+				}, input, outputWriter)
+				_ = outputWriter.CloseWithError(err)
+				done <- err
+			}()
+			sent := make(chan error, 1)
+			go func() {
+				_, err := io.WriteString(inputWriter, perfFrame(`{"seq":1,"type":"request","command":"disconnect"}`))
+				sent <- err
+			}()
+			partial := make([]byte, len(response)-1)
+			if _, err := io.ReadFull(output, partial); err != nil || string(partial) != response[:len(response)-1] {
+				t.Fatalf("partial response = %q, %v", partial, err)
+			}
+			if info, err := os.Stat(path); err != nil || info.Size() != 0 {
+				t.Fatalf("partial response produced capture: %v, %v", info, err)
+			}
+			close(completeResponse)
+			remaining := make([]byte, 1+len(trailing))
+			if _, err := io.ReadFull(output, remaining); err != nil || string(remaining) != response[len(response)-1:]+trailing {
+				t.Fatalf("response/trailing bytes = %q, %v", remaining, err)
+			}
+			var durable string
+			if success {
+				trace, encoded := readPerfTrace(t, path)
+				durable = encoded
+				if !trace.OtherData.CaptureComplete || trace.OtherData.ProxyExitObserved ||
+					trace.OtherData.FinalizationBoundary != "disconnect_response" ||
+					trace.OtherData.CompletedRequests != 1 || trace.OtherData.ObservedEvents != 0 {
+					t.Fatalf("durable disconnect capture = %#v", trace.OtherData)
+				}
+			} else if info, err := os.Stat(path); err != nil || info.Size() != 0 {
+				t.Fatalf("failed disconnect finalized capture: %v, %v", info, err)
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("proxy changed half-close semantics with open stdin: %v", err)
+			default:
+			}
+			if err := <-sent; err != nil {
+				t.Fatal(err)
+			}
+			_ = inputWriter.Close()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			trace, encoded := readPerfTrace(t, path)
+			if success && encoded != durable {
+				t.Fatal("normal exit rewrote the durable disconnect capture")
+			}
+			if !success && (!trace.OtherData.ProxyExitObserved || trace.OtherData.FinalizationBoundary != "proxy_exit" ||
+				trace.OtherData.FailedRequests != 1 || trace.OtherData.ObservedEvents != 1) {
+				t.Fatalf("failed-disconnect exit capture = %#v", trace.OtherData)
+			}
+		})
+	}
+}
+
+func TestPerfProxyDisconnectCaptureSurvivesEditorKill(t *testing.T) {
+	response := perfFrame(`{"seq":1,"type":"response","request_seq":1,"command":"disconnect","success":true}`)
+	configPath, controlDir := perfProxyFixture(t, func(_ context.Context, connection net.Conn) error {
+		if _, err := dap.NewDecoder(connection).Decode(); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, response)
+		return err
+	})
+	path := filepath.Join(t.TempDir(), "killed-editor-trace.json")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, executable, "-test.run=^TestPerfProxyEditorKillHelper$")
+	child.Env = append(os.Environ(),
+		"MULTIDAP_PERF_EDITOR_KILL_HELPER=1",
+		"MULTIDAP_PERF_EDITOR_CONFIG="+configPath,
+		"MULTIDAP_PERF_EDITOR_CONTROL="+controlDir,
+		"MULTIDAP_PERF_EDITOR_OUTPUT="+path,
+	)
+	var diagnostics bytes.Buffer
+	child.Stderr = &diagnostics
+	input, err := child.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	defer func() {
+		_ = input.Close()
+		_ = child.Process.Kill()
+	}()
+	if _, err := io.WriteString(input, perfFrame(`{"seq":1,"type":"request","command":"disconnect"}`)); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, len(response))
+	if _, err := io.ReadFull(output, reply); err != nil || string(reply) != response {
+		t.Fatalf("editor response = %q, %v", reply, err)
+	}
+	// Model an editor that kills its owned adapter immediately after receiving
+	// disconnect, without first closing stdin or giving the proxy a grace period.
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("helper exited normally instead of being terminated by the editor")
+	}
+	trace, _ := readPerfTrace(t, path)
+	if !trace.OtherData.CaptureComplete || trace.OtherData.CompletedRequests != 1 ||
+		trace.OtherData.ProxyExitObserved || trace.OtherData.FinalizationBoundary != "disconnect_response" {
+		t.Fatalf("capture after editor kill = %#v", trace.OtherData)
+	}
+}
+
+func TestPerfProxyEditorKillHelper(t *testing.T) {
+	if os.Getenv("MULTIDAP_PERF_EDITOR_KILL_HELPER") != "1" {
+		return
+	}
+	err := runProxy(context.Background(), []string{
+		"--config", os.Getenv("MULTIDAP_PERF_EDITOR_CONFIG"),
+		"--control-dir", os.Getenv("MULTIDAP_PERF_EDITOR_CONTROL"),
+		"--perf-output", os.Getenv("MULTIDAP_PERF_EDITOR_OUTPUT"),
+	}, os.Stdin, os.Stdout)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestPerfProxyPreservesDisconnectCaptureAfterOutputFailure(t *testing.T) {
+	configPath, controlDir := perfProxyFixture(t, func(_ context.Context, connection net.Conn) error {
+		if _, err := dap.NewDecoder(connection).Decode(); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, perfFrame(`{"seq":1,"type":"response","request_seq":1,"command":"disconnect","success":true}`))
+		return err
+	})
+	path := filepath.Join(t.TempDir(), "trace.json")
+	writeErr := errors.New("private-output-error")
+	err := runProxy(context.Background(), []string{
+		"--config", configPath, "--control-dir", controlDir, "--perf-output", path,
+	}, strings.NewReader(perfFrame(`{"seq":1,"type":"request","command":"disconnect"}`)), perfFailureWriter{err: writeErr})
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("output failure was lost: %v", err)
+	}
+	trace, encoded := readPerfTrace(t, path)
+	if trace.OtherData.ProxyExitObserved || trace.OtherData.FinalizationBoundary != "disconnect_response" ||
+		!trace.OtherData.CaptureComplete || strings.Contains(encoded, writeErr.Error()) {
+		t.Fatalf("finalized observation interval = %#v", trace.OtherData)
 	}
 }
 
