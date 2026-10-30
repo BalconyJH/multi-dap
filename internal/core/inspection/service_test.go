@@ -3,6 +3,7 @@ package inspection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -291,6 +292,37 @@ func TestStackAndScopesValidateWholeSnapshotBeforeAllocatingReferences(t *testin
 	}
 	if _, err := store.Resolve(2, stop.StopEpoch, stop.Stopped); !errors.Is(err, handle.ErrStale) {
 		t.Fatalf("invalid scopes allocated a scope handle: %v", err)
+	}
+}
+
+func TestStackMapsWholeSnapshotBeforePagingOrAllocatingReferences(t *testing.T) {
+	for _, page := range []Page{{Count: 1}, {Count: 2}, {Start: 2, Count: 1}, {Count: 0}} {
+		t.Run(fmt.Sprint(page), func(t *testing.T) {
+			backend := &fakeBackend{frames: map[CoreID][]RawFrame{0: {
+				{Index: 0, Name: "main", DebugPath: "valid.c"},
+				{Index: 1, Name: "caller", DebugPath: "invalid.c"},
+			}}}
+			service, store := newService(t, backend)
+			mappingFailure := errors.New("source mapping unavailable")
+			service.mapper = mapperFunc(func(path string) (source.Identity, error) {
+				if path == "invalid.c" {
+					return source.Identity{}, mappingFailure
+				}
+				return source.Identity{DebugPath: path}, nil
+			})
+			stop := StopContext{Stopped: true, StopEpoch: 1}
+			if _, err := service.Stack(context.Background(), stop, 0, page); !errors.Is(err, mappingFailure) {
+				t.Fatalf("Stack() error = %v, want mapping failure", err)
+			}
+			if _, err := store.Resolve(1, stop.StopEpoch, stop.Stopped); !errors.Is(err, handle.ErrStale) {
+				t.Fatalf("mapping failure allocated a frame handle: %v", err)
+			}
+			backend.frames[0][1].DebugPath = "valid-caller.c"
+			stack, err := service.Stack(context.Background(), stop, 0, Page{Count: 2})
+			if err != nil || len(stack.Frames) != 2 || stack.Frames[0].ID != 1 || stack.Frames[1].ID != 2 {
+				t.Fatalf("valid retry = (%#v, %v), want unconsumed handles 1 and 2", stack, err)
+			}
+		})
 	}
 }
 

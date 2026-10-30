@@ -28,18 +28,22 @@ func (s *Service) Stack(ctx context.Context, stop StopContext, core CoreID, page
 	if err != nil {
 		return Stack{}, fmt.Errorf("inspection: stack core=%d: %w", core, err)
 	}
+	prepared := make([]Frame, 0, len(frames))
 	for _, raw := range frames {
-		if err := validateRawFrame(raw); err != nil {
-			return Stack{}, err
-		}
-	}
-	start, end := pageBounds(page, len(frames))
-	result := Stack{Frames: make([]Frame, 0, end-start), Total: len(frames)}
-	for _, raw := range frames[start:end] {
-		frame, err := s.makeFrame(stop, core, raw)
+		frame, err := s.prepareFrame(stop, core, raw)
 		if err != nil {
 			return Stack{}, err
 		}
+		prepared = append(prepared, frame)
+	}
+	start, end := pageBounds(page, len(frames))
+	result := Stack{Frames: make([]Frame, 0, end-start), Total: len(frames)}
+	for _, frame := range prepared[start:end] {
+		id, err := s.handles.Alloc(handle.KindFrame, core, stop.StopEpoch, frameValue{index: frame.BackendIndex})
+		if err != nil {
+			return Stack{}, fmt.Errorf("inspection: allocate frame: %w", err)
+		}
+		frame.ID = id
 		result.Frames = append(result.Frames, frame)
 	}
 	return result, nil
@@ -162,9 +166,9 @@ func (s *Service) Evaluate(ctx context.Context, stop StopContext, frameID int32,
 	return s.makeVariable(stop, h.Core, raw, evaluatedLocator(expression))
 }
 
-func (s *Service) makeFrame(stop StopContext, core CoreID, raw RawFrame) (Frame, error) {
-	if raw.Name == "" {
-		return Frame{}, fmt.Errorf("%w: frame name is empty", ErrBackendContract)
+func (s *Service) prepareFrame(stop StopContext, core CoreID, raw RawFrame) (Frame, error) {
+	if err := validateRawFrame(raw); err != nil {
+		return Frame{}, err
 	}
 	frame := Frame{Name: raw.Name, BackendIndex: raw.Index}
 	if raw.HasInstructionAddress {
@@ -180,11 +184,6 @@ func (s *Service) makeFrame(stop StopContext, core CoreID, raw RawFrame) (Frame,
 		}
 		frame.Source = &Source{Identity: identity, Line: raw.Line, Column: raw.Column}
 	}
-	id, err := s.handles.Alloc(handle.KindFrame, core, stop.StopEpoch, frameValue{index: raw.Index})
-	if err != nil {
-		return Frame{}, fmt.Errorf("inspection: allocate frame: %w", err)
-	}
-	frame.ID = id
 	return frame, nil
 }
 
