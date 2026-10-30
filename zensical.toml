@@ -13,6 +13,7 @@ nav = [
   { "Project configuration" = "configuration.md" },
   { "Architecture" = "architecture.md" },
   { "Capabilities and status" = "capabilities.md" },
+  { "Performance timeline" = "performance.md" },
   { "Operations" = "operations.md" },
   { "Development" = "development.md" },
   { "Windows distribution" = "distribution.md" },
