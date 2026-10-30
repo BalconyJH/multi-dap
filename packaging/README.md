@@ -3,13 +3,16 @@
 This package contains the `multi-dap.exe` daemon and the bridge source that it
 launches through the local Green Hills MULTI `mpythonrun.exe`. MULTI 8 uses its
 embedded Python 3 runtime by default; Python 2.7 remains an explicit fallback
-through the project configuration.
+through the project configuration. The separate native trace binding and
+helper require Python 3.8+ and are not imported by the Python 2 bridge.
 
 ## Contents
 
 ```
 multi-dap.exe
 bridge/bridge.py
+bridge/timemachine_helper.py
+bridge/timemachine_native.py
 editors/clion/README.md
 editors/clion/profile-contract.json
 examples/multi-dap.example.toml
@@ -47,12 +50,28 @@ Use `--bridge-script <absolute-path>` only when intentionally selecting a
 different bridge. `multi-dap version` prints the embedded product version,
 source commit when present, and reproducible build timestamp as JSON.
 
+The native trace helper is resolved from the same directory as the selected
+`bridge.py`: keep `timemachine_helper.py` and `timemachine_native.py` beside it,
+including when using an explicit `--bridge-script`. There is no helper lookup
+through the working directory or system Python. Native trace uses the selected
+MULTI installation's standalone Python 3.8+ and vendor library; it does not require pip
+or additional third-party Python packages. Neither Python nor the vendor DLL
+is redistributed in this archive.
+
+Packaging the helper enables an optional experimental interface, not proof
+that a native runtime, source binding, decoder, or physical trace source is
+qualified. Startup performs only static native-runtime checks; the helper is
+started only by an explicit native trace open request. Missing prerequisites
+disable this optional capability without disabling ordinary DAP.
+
 If a TCP DAP client requires a fixed address, set `endpoints.dap.port` in the private
 configuration to an unused fixed loopback port. Port `0` enables automatic assignment; the
 actual address appears only in the single-line `ready` JSON written by the daemon to stdout.
 
-The daemon owns only the `mpythonrun` child process it creates. It never cleans up the MULTI
-GUI, service router, target server, or any other process by process name.
+The daemon owns only the child processes it creates: the selected bridge runner
+and, after an explicit native trace open request, the optional trace helper.
+It never cleans up the MULTI GUI, service router, target server, or any other
+process by process name.
 
 CLion uses the native **Cidr DAP CMake Debug** integration. Create a `multi-dap` DAP profile
 under Debug Profiles: set Executable to the packaged `multi-dap.exe`, Arguments to
