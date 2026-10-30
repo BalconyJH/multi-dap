@@ -8,6 +8,30 @@ version is tagged.
 
 ### Added
 
+- Bounded, read-only Windows host-process diagnostics through
+  `doctor --processes`, with explicit private-path opt-in and count-only startup
+  notices. Process observations never establish ownership/probe availability
+  or trigger termination, adoption, or target recovery; static checks and
+  editor ready receipts remain unchanged.
+- Experimental VS Code native-buffer capture through the existing configured
+  debug session. A bounded Go editor transport reuses typed capture validation,
+  private output creation, and conservative native cleanup; cancellation and
+  late replies retain reconciliation state instead of starting a second
+  frontend or implicitly stopping collection.
+- A registered local Windows Zed source extension with a strict attach schema,
+  authenticated stdio proxy, optional host capture, pinned Rust SDK/lockfile,
+  host tests, and Wasm build checks. Real Zed GUI/target acceptance remains open.
+- A shared Python 2/3 `mbp_wire.py` mechanism helper for text conversion,
+  frame encoding/decoding, and bounded reading. The selected bridge loads only
+  its exact sibling source; deterministic packages and publication/install
+  checks bind the required companion.
+- Opt-in real VS Code Extension Host acceptance with isolated editor data,
+  the production authenticated proxy and DAP server, and a synthetic backend.
+  It exercises attach, explicit daemon reuse, inspection, disconnect, and
+  private host and native interval capture without starting a vendor runtime.
+- Optional explicit cold/warm daemon acquisition in the VS Code source
+  extension. Bounded `ensure` completion precedes the authenticated proxy;
+  default attach remains proxy-only and warm never falls back to cold.
 - Explicitly mapped, bounded Profiler CSV analysis with exact decimal/count
   ranking, source identity and line ranges, missing-value preservation, and
   input/mapping hashes. Real vendor-format qualification remains open.
@@ -52,6 +76,36 @@ version is tagged.
 
 ### Fixed
 
+- Process-liveness checks reject IDs that exceed the operating system's PID
+  width before invoking system APIs, retaining ambiguous startup reservations
+  instead of probing a truncated PID or Unix process group.
+- Hosted CI regressions now exercise malformed aggregate fixtures under both
+  LF and CRLF and separate portable acquisition-identity checks from the
+  Windows-only positive warm-runtime path.
+- Host captures finalize durably before a matched successful disconnect reply
+  reaches an editor that may immediately terminate its adapter. Explicit
+  finalization metadata distinguishes that boundary from observed proxy exit;
+  later bytes are still forwarded and the durable file is never rewritten.
+- Maximum-size MBP frames with CRLF now preserve their acceptance boundary
+  when CR and LF arrive in separate socket reads.
+- Queued execution and source-breakpoint mutations recheck their original
+  control-lease generation before dispatch. Source mutation and pending
+  cleanup require the original stopped epoch; stopped-only work refreshes
+  state after execution invalidates the previous observation.
+- VS Code rejects remote/virtual workspaces, control characters in paths,
+  and Windows paths that depend on the current drive before starting an
+  adapter or acquisition process.
+- Top-frame inspection verifies MULTI's selected frame before reading locals,
+  evaluating expressions, or expanding children. Caller frames remain visible
+  in stack snapshots without receiving the live program counter.
+- Stack parsing rejects duplicate indices and multiple selected frames.
+  Complete source mapping is validated before paging and handle allocation,
+  including invalid sources outside the requested page.
+- The Go architectural contract scan respects nested module boundaries, so
+  private source snapshots do not produce false ownership violations.
+- Development status now explicitly includes continue/pause in the existing
+  multicore execution gate; the disabled domain has never qualified these
+  operations merely because group semantics are described.
 - MULTI component inventories accept comma-separated PID/core aliases without
   treating them as program bindings, including observed 8.1.4 name-first
   ordering. Ambiguous display tails remain intact and explicitly marked;
