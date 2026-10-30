@@ -352,6 +352,11 @@ func TestRunCommandsLiteralIsOwnedByMultiDriver(t *testing.T) {
 			case ".git", ".hwscratch":
 				return filepath.SkipDir
 			}
+			// Match the module boundary used by go test ./...; private
+			// snapshots and independent nested modules are not adapter code.
+			if path != root && fileExists(filepath.Join(path, "go.mod")) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if filepath.Ext(path) != ".go" || strings.HasPrefix(filepath.Clean(path), filepath.Join(root, "internal", "contract")+string(filepath.Separator)) {
