@@ -20,6 +20,7 @@ import (
 	"github.com/Tacrolimus/multi-dap/internal/core/source"
 	"github.com/Tacrolimus/multi-dap/internal/dap"
 	"github.com/Tacrolimus/multi-dap/internal/multi"
+	"github.com/Tacrolimus/multi-dap/internal/tracecontrol"
 )
 
 var (
@@ -68,12 +69,13 @@ type bridgeStarter func(context.Context, bridge.LaunchSpec) (bridgeProcess, erro
 // Runtime owns one bridge child, one Session Actor, and one loopback-only DAP
 // server. It does not own MULTI, its service router, or the physical target.
 type Runtime struct {
-	config  config.Validated
-	process bridgeProcess
-	lock    probeLock
-	actor   *actor.Actor
-	backend *Backend
-	dap     *dap.Server
+	config      config.Validated
+	process     bridgeProcess
+	lock        probeLock
+	actor       *actor.Actor
+	backend     *Backend
+	dap         *dap.Server
+	nativeTrace *tracecontrol.Controller
 
 	closeOnce sync.Once
 	doneOnce  sync.Once
@@ -184,6 +186,7 @@ func startWith(ctx context.Context, options Options, start bridgeStarter) (*Runt
 		_ = process.Close()
 		return nil, fmt.Errorf("daemon: create source resolver: %w", err)
 	}
+	nativeTrace := prepareNativeTraceController(options.Config, script, lock)
 	core, err := actor.New(actor.Options{
 		Executor:  executor,
 		Open:      openRequest,
@@ -202,6 +205,7 @@ func startWith(ctx context.Context, options Options, start bridgeStarter) (*Runt
 		SourceMap:         sourcePaths,
 		ConsoleEnabled:    true,
 		ConsoleInterval:   time.Second,
+		Trace:             nativeTrace,
 	})
 	if err != nil {
 		executor.Close()
@@ -258,7 +262,8 @@ func startWith(ctx context.Context, options Options, start bridgeStarter) (*Runt
 
 	runtime := &Runtime{
 		config: options.Config, process: process, lock: lock, actor: core, backend: backend, dap: server,
-		closeDone: make(chan struct{}), errors: make(chan error, 16),
+		nativeTrace: nativeTrace,
+		closeDone:   make(chan struct{}), errors: make(chan error, 16),
 	}
 	actorOwned = false
 	backendOwned = false
@@ -516,14 +521,11 @@ func (r *Runtime) Close() {
 		if r.actor != nil {
 			r.actor.Close()
 		}
+		nativeDone := r.nativeTrace.ShutdownDone()
 		if r.process != nil {
 			_ = r.process.Close()
 		}
-		if r.lock != nil {
-			if err := r.lock.Close(); err != nil {
-				r.report(err)
-			}
-		}
+		r.releaseProbeAfterNative(nativeDone)
 	})
 }
 
@@ -578,16 +580,36 @@ func (r *Runtime) failWithMetadata(err error, metadata TerminalMetadata) {
 		if r.actor != nil {
 			r.actor.Close()
 		}
+		nativeDone := r.nativeTrace.ShutdownDone()
 		if r.process != nil {
 			_ = r.process.Close()
 		}
-		if r.lock != nil {
-			if releaseErr := r.lock.Close(); releaseErr != nil {
-				r.report(releaseErr)
-			}
-		}
+		r.releaseProbeAfterNative(nativeDone)
 		r.report(err)
 	})
+}
+
+func (r *Runtime) releaseProbeAfterNative(done <-chan struct{}) {
+	if r.lock == nil {
+		return
+	}
+	release := func() {
+		if err := r.lock.Close(); err != nil {
+			r.report(err)
+		}
+	}
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		release()
+	case <-timer.C:
+		r.report(errors.New("daemon: native helper cleanup is unconfirmed; probe lease retained"))
+		go func() {
+			<-done
+			release()
+		}()
+	}
 }
 
 func (r *Runtime) signalClosed() {
