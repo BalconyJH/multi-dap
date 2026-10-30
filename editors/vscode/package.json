@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node --check src/extension.js && node --check src/native_capture.js && node --check test/extension.test.js && node --check test/native_capture.test.js && node --check scripts/list-package-files.js",
+    "test:editor": "node scripts/run-editor-acceptance.js",
+    "lint": "node --check src/extension.js && node --check src/native_capture.js && node --check test/extension.test.js && node --check test/native_capture.test.js && node --check scripts/list-package-files.js && node --check scripts/run-editor-acceptance.js && node --check acceptance/extension-host.js",
     "package-contents": "node scripts/list-package-files.js"
   },
   "keywords": [],

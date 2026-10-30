@@ -1,6 +1,7 @@
 .gitignore
 .vscodeignore
 test/**
+acceptance/**
 scripts/**
 *.vsix
 *.tgz
