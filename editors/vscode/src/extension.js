@@ -5,6 +5,7 @@ const path = require('node:path');
 const DEBUG_TYPE = 'multi-dap';
 const CONFIGURATION_SECTION = 'multiDap';
 const FORBIDDEN_CONNECTION_OPTIONS = ['debugServer', 'host', 'port'];
+const MAX_PERF_EVENTS = 100000;
 
 function configurationError(configuration, requireAbsolutePaths = true) {
   if (configuration === undefined || configuration === null || typeof configuration !== 'object') {
@@ -35,6 +36,27 @@ function configurationError(configuration, requireAbsolutePaths = true) {
       return 'controlDirectory must be an absolute path when supplied.';
     }
   }
+  const hasPerfOutput = Object.prototype.hasOwnProperty.call(configuration, 'perfOutput');
+  if (hasPerfOutput) {
+    if (typeof configuration.perfOutput !== 'string' || configuration.perfOutput.trim() === '') {
+      return 'perfOutput must be a non-empty absolute path to a new private capture file.';
+    }
+    if (/[\u0000-\u001f\u007f]/.test(configuration.perfOutput)) {
+      return 'perfOutput contains an invalid control character.';
+    }
+    if (requireAbsolutePaths && !path.isAbsolute(configuration.perfOutput)) {
+      return 'perfOutput must be an absolute path after variable substitution.';
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(configuration, 'perfMaxEvents')) {
+    if (!hasPerfOutput) {
+      return 'perfMaxEvents requires an explicit perfOutput.';
+    }
+    if (!Number.isInteger(configuration.perfMaxEvents) ||
+        configuration.perfMaxEvents < 1 || configuration.perfMaxEvents > MAX_PERF_EVENTS) {
+      return `perfMaxEvents must be an integer in 1..${MAX_PERF_EVENTS}.`;
+    }
+  }
   return undefined;
 }
 
@@ -52,6 +74,12 @@ function proxyCommand(configuration, executable) {
   const args = ['proxy', '--config', configuration.configFile];
   if (Object.prototype.hasOwnProperty.call(configuration, 'controlDirectory')) {
     args.push('--control-dir', configuration.controlDirectory);
+  }
+  if (Object.prototype.hasOwnProperty.call(configuration, 'perfOutput')) {
+    args.push('--perf-output', configuration.perfOutput);
+  }
+  if (Object.prototype.hasOwnProperty.call(configuration, 'perfMaxEvents')) {
+    args.push('--perf-max-events', String(configuration.perfMaxEvents));
   }
   return { command: executable.trim(), args };
 }
@@ -105,6 +133,7 @@ module.exports = {
   CONFIGURATION_SECTION,
   DEBUG_TYPE,
   FORBIDDEN_CONNECTION_OPTIONS,
+  MAX_PERF_EVENTS,
   activate,
   configurationError,
   deactivate,

@@ -42,7 +42,24 @@
               "controlDirectory": {
                 "type": "string",
                 "description": "Optional absolute path to multi-dap's private control-record directory."
+              },
+              "perfOutput": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f])[\\s\\S]*\\S[\\s\\S]*$",
+                "description": "Optional absolute path, after variable substitution, to a new private host-latency capture file. The parent directory must exist; existing files are never overwritten."
+              },
+              "perfMaxEvents": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000,
+                "description": "Optional retained-event limit for host-latency capture. Requires perfOutput; omission uses the CLI's default limit."
               }
+            },
+            "dependencies": {
+              "perfMaxEvents": [
+                "perfOutput"
+              ]
             },
             "required": [
               "configFile"
