@@ -48,6 +48,11 @@ pwsh -NoProfile -File .\scripts\Invoke-WindowsReleaseAcceptance.ps1 -Version 0.1
 
 Full mode runs `go test ./...`, `go vet ./...`, and `go test -race ./...` under `GOPROXY=off` and `-mod=readonly`, so it uses only the existing Go module cache, downloads no dependencies, and does not rewrite `go.mod` or `go.sum`. It then runs bridge and recon Python 3 host tests using `uv run --offline --no-python-downloads --no-project --python 3.12`. These tests use a fake MULTI API, do not start a GUI, do not connect hardware, and do not automatically download Python.
 
+The bridge host-test command includes `bridge.test_bridge`,
+`bridge.test_timemachine_native`, and `bridge.test_timemachine_helper`. The native
+binding and helper require Python 3.8+; the host tests use synthetic native APIs
+and bounded helper-process fixtures, never the vendor DLL or a physical target.
+
 For the embedded-runtime compilation step, the script prefers a standalone
 Python 3 interpreter. Pass `-MultiPython3 <path-to-python.exe>` to select one
 explicitly; `-MultiPython2 <path-to-python.exe>` selects the legacy fallback,
@@ -63,7 +68,23 @@ This check does not execute a probe or open a target. If no usable standalone
 interpreter is configured, the step is explicitly `skipped` and is never
 counted as passing; compilation writes no `.pyc` into the working tree.
 
+The separate `native-timemachine-python-compile` step compiles both
+`bridge/timemachine_native.py` and `bridge/timemachine_helper.py` with the
+selected Python 3 interpreter, requiring Python 3.8+. It performs bytecode
+compilation only; it does not import the native modules or load DLLs. Selecting
+the legacy Python 2 fallback leaves the ordinary bridge/recon compilation contract unchanged and
+explicitly skips this native-only step; a skipped step is not native-runtime
+qualification.
+
 Finally, full mode runs `Test-WindowsPackage.ps1`: it independently builds two ZIP files, requires matching archive hashes, verifies each archive's entry allowlist and rejection of runtime artifacts such as configuration/token/capture/log/ready files, and validates in both directions that the manifest has a complete, unique, ordered payload set and SHA-256 for every payload. This is a PowerShell self-test independent of Pester.
+
+The extracted executable is checked for version/build metadata and complete
+analysis help syntax, then runs `profile import` and `trace normalize` with
+temporary synthetic inputs, including physical-time Chrome output. The smoke
+checks exact profile counts and explicit unqualified provenance; it never
+starts a daemon, runs a collection request, or loads a vendor DLL. Host proxy
+recording remains covered by its Go tests rather than a package test that
+would connect to an operator session.
 
 Each step emits `PASS`, `FAIL`, or `SKIP` with its duration. The final line is CI-readable `RELEASE_ACCEPTANCE_RESULT` JSON; the process exits with `1` when any required step fails. During development, `-Mode Fast` runs ordinary Go test, vet, and both Python host-test suites. It explicitly skips race tests, MULTI embedded-runtime compilation, and dual-build package verification, and cannot be used for release.
 
@@ -71,6 +92,8 @@ The package contains only:
 
 - `multi-dap.exe`
 - `bridge/bridge.py`
+- `bridge/timemachine_helper.py`
+- `bridge/timemachine_native.py`
 - `examples/multi-dap.example.toml`
 - `editors/clion/README.md`
 - `editors/clion/profile-contract.json`
@@ -97,10 +120,27 @@ fallback. The audited CLion setup also keeps the path explicit. This makes an
 intact ZIP or WinGet installation independent of the caller's working directory
 without allowing a project checkout to replace executable code implicitly.
 
+The native trace helper is selected strictly beside that selected `bridge.py`;
+its `timemachine_native.py` sibling must remain in the same directory. Explicit
+`--bridge-script` selection therefore selects the whole companion bundle, not
+a helper from the current directory, `PATH`, or another installation. The
+optional helper uses a standalone Python 3.8+ from the configured MULTI
+installation and only Python standard-library modules, with no system `pip`
+dependency. Python interpreters and vendor DLLs remain external prerequisites
+and are never included in the ZIP.
+
+Software integration, package allowlist/manifest verification, and reproducible
+builds qualify only the software bundle. They neither prove native DLL/source
+compatibility nor authorize target collection. The helper starts lazily on an
+explicit trace open request, and its capability remains experimental until
+separate native-runtime and hardware evidence exists.
+
 The release workflow can generate a WinGet 1.12 multi-file manifest for the
 exact archive URL and digest. It uses a portable ZIP with
-`ArchiveBinariesDependOnPath: true` so the executable and companion bridge stay
-together. See the [release guide](releasing.md) for publication gates and the
+`ArchiveBinariesDependOnPath: true` so the executable, bridge, and native helper
+companions stay together. Publication compares all three Python files with the
+tagged source, and WinGet staging verifies their installed digests against the
+release archive. See the [release guide](releasing.md) for publication gates and the
 reasons `uv` and Homebrew installation are deferred.
 
 ## VS Code: local-proxy extension
