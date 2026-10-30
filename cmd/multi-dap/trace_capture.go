@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"io"
-	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/Tacrolimus/multi-dap/internal/control"
 	"github.com/Tacrolimus/multi-dap/internal/dap"
 	"github.com/Tacrolimus/multi-dap/internal/timemachine"
-	"github.com/Tacrolimus/multi-dap/internal/tracecontrol"
 )
 
 const traceCaptureMaxMessages = 128
@@ -219,6 +216,7 @@ func traceCaptureDeadline(configured time.Duration) time.Duration {
 }
 
 type traceCaptureDAP struct {
+	traceCaptureSession
 	ctx         context.Context
 	cancel      context.CancelFunc
 	input       *io.PipeWriter
@@ -229,20 +227,11 @@ type traceCaptureDAP struct {
 	stopOnce    sync.Once
 	proxyWaited bool
 	proxyErr    error
-	rpcTimeout  time.Duration
-	openTimeout time.Duration
 	sequence    int64
 	serverSeq   int64
 	messages    int
-	stage       string
 	healthy     bool
 	attached    bool
-
-	handle          uint64
-	nativeAttempted bool
-	nativeHealthy   bool
-	closeAttempted  bool
-	nativeClosed    bool
 }
 
 func newTraceCaptureDAP(ctx context.Context, record control.Record) *traceCaptureDAP {
@@ -253,6 +242,7 @@ func newTraceCaptureDAP(ctx context.Context, record control.Record) *traceCaptur
 		ctx: proxyContext, cancel: cancel, input: writer, output: reader, done: make(chan error, 1),
 		encoder: dap.NewEncoder(writer), decoder: dap.NewDecoder(reader), healthy: true,
 	}
+	c.traceCaptureSession.transport = c
 	go func() {
 		err := control.Proxy(proxyContext, record, input, output)
 		_ = input.CloseWithError(err)
@@ -403,142 +393,25 @@ func (c *traceCaptureDAP) capture(options traceCaptureOptions) (timemachine.Capt
 	}); err != nil {
 		return fail(err)
 	}
-	c.stage, c.nativeAttempted = "native open", true
-	opened, err := c.nativeRequest("open", options.open, c.openTimeout)
-	if err != nil {
-		return fail(err)
-	}
-	if !healthyCaptureStatus(opened.Status, opened.Status.Handle) || len(opened.Batch) != 0 ||
-		opened.Receipt.Operation != "open" || opened.Receipt.Outcome != "observed" {
-		return fail(c.invalidNative())
-	}
-	c.handle, c.nativeHealthy = opened.Status.Handle, true
-	c.stage = "native poll"
-	polled, err := c.nativeRequest("poll", dap.NativeTraceHandleArguments{Handle: c.handle}, c.rpcTimeout)
-	if err != nil {
-		return fail(err)
-	}
-	if !healthyCaptureStatus(polled.Status, c.handle) || len(polled.Batch) != 0 ||
-		polled.Status.NativeGeneration < opened.Status.NativeGeneration {
-		return fail(c.invalidNative())
-	}
-	c.stage = "native read"
-	read, err := c.nativeRequest("read", dap.NativeTraceReadArguments{
-		Handle: c.handle, Start: options.start, Generation: polled.Status.NativeGeneration, Count: options.count,
-	}, c.rpcTimeout)
-	if err != nil {
-		return fail(err)
-	}
-	c.stage = "capture validation"
-	capture, err := timemachine.DecodeCapture(bytes.NewReader(read.Batch))
-	if err != nil || !healthyCaptureStatus(read.Status, c.handle) ||
-		read.Status.NativeGeneration != polled.Status.NativeGeneration ||
-		read.Receipt.Operation != "read" || read.Receipt.Outcome != "read" ||
-		!captureSourceMatches(capture.Source, options.open) || len(capture.Generations) != 1 {
-		return fail(c.invalidNative())
-	}
-	generation := capture.Generations[0]
-	if generation.ID != polled.Status.NativeGeneration || generation.FirstIndex != options.start ||
-		len(generation.PacketsHex) > options.count {
-		return fail(c.invalidNative())
-	}
-	return capture, nil
+	return c.traceCaptureSession.capture(options)
 }
 
-type traceCaptureNativeResult struct {
-	Status  tracecontrol.Status  `json:"status"`
-	Batch   json.RawMessage      `json:"batch,omitempty"`
-	Receipt tracecontrol.Receipt `json:"receipt"`
-}
-
-func (c *traceCaptureDAP) nativeRequest(operation string, arguments any, timeout time.Duration) (traceCaptureNativeResult, error) {
-	body, err := c.request("multi-dap/trace/"+operation, arguments, timeout)
-	if err != nil {
-		return traceCaptureNativeResult{}, err
-	}
-	var result traceCaptureNativeResult
-	if err := decodeTraceCaptureJSON(body, &result); err != nil {
-		return traceCaptureNativeResult{}, c.invalidNative()
-	}
-	return result, nil
-}
-
-func decodeTraceCaptureJSON(data []byte, destination any) error {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || len(data) > dap.MaxNativeTraceBodyLength || trimmed[0] != '{' {
-		return errors.New("invalid native response")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	if decoder.Decode(new(any)) != io.EOF {
-		return errors.New("trailing native response")
-	}
-	return nil
-}
-
-func (c *traceCaptureDAP) invalidNative() error {
-	c.healthy, c.nativeHealthy = false, false
-	return errors.New("native response failed validation")
-}
-
-func healthyCaptureStatus(status tracecontrol.Status, handle uint64) bool {
-	return handle > 0 && handle <= math.MaxInt32 && status.Handle == handle &&
-		status.State == "open" && !status.Busy && !status.NeedsReconciliation &&
-		status.NativeGeneration > 0 && status.PacketCountKnown &&
-		status.SourceBinding == "operator_declared" &&
-		!status.NativeRuntimeQualified && !status.HardwareQualified &&
-		!status.LastReceipt.NativeStateUncertain && !status.LastReceipt.HelperAbortRequested
-}
-
-func captureSourceMatches(source timemachine.Source, expected dap.NativeTraceOpenArguments) bool {
-	coreMatches := source.CoreID == nil && expected.CoreID == nil ||
-		source.CoreID != nil && expected.CoreID != nil && *source.CoreID == *expected.CoreID
-	return source.Kind == expected.SourceKind && source.SessionID == expected.SessionID &&
-		source.SourceID == expected.SourceID && coreMatches &&
-		source.ImageSHA256 == expected.ImageSHA256 && source.SnapshotSHA256 == expected.SnapshotSHA256 &&
-		source.InitialContext == nil
-}
-
+func (c *traceCaptureDAP) transportHealthy() bool { return c.healthy }
+func (c *traceCaptureDAP) invalidateTransport()   { c.healthy = false }
 func (c *traceCaptureDAP) cleanup() error {
 	if !c.healthy || !c.attached {
 		return nil
 	}
 	originalStage := c.stage
-	var cleanupErr error
-	cleanupStage := ""
+	cleanupErr := c.traceCaptureSession.cleanup()
+	cleanupStage := c.stage
 	recordError := func(stage string, err error) {
 		if err != nil {
-			if cleanupStage == "" {
+			if cleanupErr == nil {
 				cleanupStage = stage
 			}
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
-	}
-	if c.handle != 0 && !c.nativeHealthy {
-		status, err := c.nativeRequest("status", struct{}{}, c.rpcTimeout)
-		if err == nil {
-			c.nativeHealthy = healthyCaptureStatus(status.Status, c.handle)
-		}
-		recordError("local native status", err)
-	}
-	if c.healthy && c.nativeHealthy && !c.closeAttempted {
-		c.closeAttempted, c.stage = true, "native close"
-		closed, err := c.nativeRequest("close", dap.NativeTraceHandleArguments{Handle: c.handle}, c.rpcTimeout)
-		if err == nil {
-			if closed.Status.Handle != c.handle || closed.Status.State != "closed" ||
-				closed.Status.Busy || closed.Status.NeedsReconciliation || len(closed.Batch) != 0 ||
-				closed.Receipt.Operation != "close" || closed.Receipt.Outcome != "closed" ||
-				!closed.Receipt.NativeDisconnectConfirmed || closed.Receipt.NativeStateUncertain ||
-				closed.Receipt.HelperAbortRequested {
-				err = c.invalidNative()
-			} else {
-				c.nativeClosed = true
-			}
-		}
-		recordError("native close", err)
 	}
 	if c.healthy {
 		c.stage = "DAP disconnect"
