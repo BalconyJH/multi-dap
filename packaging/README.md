@@ -109,6 +109,93 @@ The legacy `multi-dap attach` is a Python configuration and must be disabled or 
 and Hardware validation checklist; `profile-contract.json` is a field contract,
 not a file importable by CLion.
 
+## Command-line and analysis features
+
+Run `.\multi-dap.exe help` for the complete command syntax. The bundle includes
+`version`, installation discovery (`multi-version`), configuration checks
+(`doctor` / `check`), lifecycle commands (`serve`, `ensure`, `status`,
+`shutdown`, `diagnose`), the authenticated DAP `proxy`, and the two offline
+analysis commands below. Discovery, lifecycle, and target operations retain
+their separate documented authorization requirements.
+
+Add bounded host-side recording to the existing editor's stdio proxy command:
+
+```powershell
+.\multi-dap.exe proxy --config C:\private\project.toml `
+  --perf-output C:\private\host-session-001.trace.json `
+  --perf-max-events 10000
+```
+
+This observes only the DAP traffic the proxy already forwards. The editor must
+still provide stdin/stdout DAP traffic, and its daemon must already be ready.
+The recorder does not start another session or sample the target; its Chrome
+Trace Event JSON measures host request latency, not target CPU/function time.
+Protocol payloads and private source fields are excluded.
+
+Import an operator-provided Profiler CSV with an explicit schema mapping:
+
+```powershell
+.\multi-dap.exe profile import --input C:\private\profile.csv `
+  --mapping C:\private\profile-mapping.json `
+  --output C:\private\profile-report-001.json
+```
+
+The mapping must declare the actual columns, units, missing-value rules, view,
+and provenance. No vendor CSV layout or self/inclusive-time meaning is guessed.
+This command imports files only; it does not ask MULTI to generate an export.
+
+Normalize a `multi-dap.native-capture.v1` packet envelope:
+
+```powershell
+.\multi-dap.exe trace normalize --input C:\private\capture.json `
+  --output C:\private\normalized-001.json `
+  --chrome-output C:\private\target-001.trace.json
+```
+
+This is multi-dap's own capture envelope, not a decoder for arbitrary `.dsnap`,
+`.tra`, `.trs`, or CSV files. Optional Chrome output requires supported
+physical-time observations and explicit context; cycles or instructions are
+not silently treated as seconds. Both offline commands operate without a
+daemon, MULTI process, or target connection. See the source repository's
+`docs/native-analysis.md` and `docs/performance.md` for the input contracts and
+interpretation limits.
+
+All analysis input/output paths are absolute. Outputs require new filenames
+in an existing private directory and are never overwritten. Keep captures and
+reports outside the installation and source tree; they are not package assets.
+
+Native acquisition is an experimental custom DAP interface, not a `trace start`
+command-line subcommand. An attached, configured client must first
+observe `multiDapSupportsNativeTraceRequests`, then use
+`multi-dap/trace/open`, `/poll`, `/read`, `/start`, `/stop`, `/close`, or
+`/status`. Opening requires an explicitly acknowledged, unverified source
+declaration; start/stop require separate authorization. They acknowledge trace
+requests, never target-running/stopped state, and do not continue/pause the
+CPU. `status` reads the local receipt without native I/O, including after a
+failure. This does not imply a ready-made IDE trace panel or qualified
+hardware tracing.
+
+For one read-only packet interval, the `trace capture` client uses that same
+authenticated DAP path against an already-running, configuration-bound daemon:
+
+```powershell
+.\multi-dap.exe trace capture --config C:\private\project.toml `
+  --session-id 17 --source-id operator-selected-source `
+  --acknowledge-unverified-source --count 4096 `
+  --output C:\private\capture-001.json
+```
+
+Replace the illustrative `17` with the explicitly selected native traceserv
+session ID, not a core, process, thread, or port number. Use `--control-dir`
+when required by the existing daemon. The command refuses an occupied frontend,
+does not create a daemon or start collection, and never issues execution,
+reset, download, or flash commands. It opens/polls/reads the chosen native
+source, explicitly closes it, and detaches without terminating or suspending
+the debuggee. Successful output is a private packet envelope for
+`trace normalize`; failures can leave an empty/partial private file and never
+report capture success. Native disconnect does not imply collection stopped.
+This remains software-tested, not a qualified real-native/hardware workflow.
+
 ## Integrity
 
 `SHA256SUMS.txt` lists the SHA-256 for every payload file except the manifest itself. Run this
@@ -137,7 +224,13 @@ separately licensed external prerequisite and is not included in this package.
 
 Before release, also run the default full mode of
 `scripts/Invoke-WindowsReleaseAcceptance.ps1` in the source repository. Without downloading Go
-dependencies, it runs host tests, available MULTI Python 3 compilation checks
-(with an explicit Python 2 fallback), and reproducibility
-plus manifest/allowlist validation for two independent ZIPs. See
+dependencies, it runs bridge/native-binding/helper host tests, available MULTI
+Python compilation checks, and reproducibility plus manifest/allowlist
+validation for two independent ZIPs. Package self-tests also exercise the
+packaged help surface and both offline analysis commands with synthetic
+fixtures, without starting a daemon or a target. See
 `docs/m6-packaging-and-editors.md` for details.
+The explicit Python 2 compilation fallback applies only to the legacy
+bridge/recon sources. The separate native compilation step requires Python
+3.8+ and compiles both the binding and helper. These software checks do not
+load a vendor DLL, operate a target, or establish hardware qualification.
