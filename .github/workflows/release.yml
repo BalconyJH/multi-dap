@@ -140,6 +140,10 @@ jobs:
         run: |
           go mod download
           uv python install 3.12
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain preparation failed.' }
+          cargo +1.95.0 fetch --locked --manifest-path editors/zed/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Zed dependency preparation failed.' }
       - name: Scan Go dependencies and call paths for known vulnerabilities
         shell: pwsh
         run: go run -mod=readonly golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...

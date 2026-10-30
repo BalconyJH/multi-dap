@@ -120,6 +120,30 @@ jobs:
           uv run --offline --no-python-downloads --no-project --python 3.12
           -m tools.validate_repository_language --repository .
 
+  zed:
+    name: Zed source extension (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust and Wasm target
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2
+      - name: Check formatting
+        run: cargo +1.95.0 fmt --manifest-path editors/zed/Cargo.toml --check
+      - name: Test the registered adapter contract
+        run: cargo +1.95.0 test --locked --manifest-path editors/zed/Cargo.toml
+      - name: Lint the extension
+        run: cargo +1.95.0 clippy --locked --manifest-path editors/zed/Cargo.toml --all-targets -- -D warnings
+      - name: Build the Wasm extension
+        run: cargo +1.95.0 build --locked --release --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
+
   go-vulnerability-audit:
     name: Go vulnerability audit
     runs-on: ubuntu-24.04
@@ -156,7 +180,7 @@ jobs:
 
   package:
     name: Windows release candidate
-    needs: [go, python-host, vscode, docs, go-vulnerability-audit, workflow-policy]
+    needs: [go, python-host, vscode, zed, docs, go-vulnerability-audit, workflow-policy]
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -184,6 +208,10 @@ jobs:
         run: |
           go mod download
           uv python install 3.12
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain preparation failed.' }
+          cargo +1.95.0 fetch --locked --manifest-path editors/zed/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Zed dependency preparation failed.' }
       - name: Run full release acceptance
         shell: pwsh
         run: |

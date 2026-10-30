@@ -8,12 +8,13 @@
 | `cmd/dwarfspike/` | Source-tree-only DWARF diagnostic; it prints input paths and is excluded from release archives. |
 | `internal/core/` | Session Actor, state, handles, source identity, breakpoints, stop arbitration, and inspection models. |
 | `internal/daemon/` | Production wiring between the actor, DAP server, bridge, and control plane. |
+| `internal/hostprocess/` | Bounded, advisory Windows process snapshots; no ownership or target-control policy. |
 | `internal/dap/` | DAP framing, lifecycle, request validation, and response/event types. |
 | `internal/mbp/` | MULTI Bridge Protocol v1 messages and codec. |
 | `internal/multi/` | Strict parsers and MULTI operation runners. |
 | `bridge/` | Python 2.7/3.8-compatible mechanism bridge and Python 3 host tests. |
 | `recon/` | Hardware reconnaissance harness; never part of the release package. |
-| `editors/` | VS Code source extension and CLion configuration contract. |
+| `editors/` | VS Code and Zed source extensions, synthetic editor acceptance, and CLion configuration contract. |
 | `scripts/` | Deterministic packaging and release acceptance. |
 | `tools/` | Repository-language and release-changelog policy validators. |
 | `packaging/` | Files copied into the Windows release archive. |
@@ -62,6 +63,14 @@ uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest br
 uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest discover -s recon/tests
 ```
 
+`bridge/mbp_wire.py` contains the shared Python 2/3 text conversion, MBP frame
+encoding/decoding, and bounded reader mechanisms. `bridge.py` loads its exact
+sibling source using the script identity supplied by MULTI's script executor.
+It does not use the project working directory, import search path, a cached
+module, or bytecode as a fallback. Keep both files together; protocol and
+MULTI-operation dispatch remain in `bridge.py`, while debugger policy remains
+in Go. Architectural policy checks cover both legacy-runtime files.
+
 These tests prove compatibility logic, framing, sanitization, parsing, and
 bounded behavior. They do not open MULTI or connect to hardware.
 
@@ -103,6 +112,54 @@ Pop-Location
 
 The extension source is MIT-licensed. Its package remains marked `private`
 because VS Code Marketplace publication has not been approved or configured.
+
+For opt-in acceptance in an installed official editor:
+
+```powershell
+Push-Location .\editors\vscode
+npm run test:editor -- --code "C:\path\to\Code.exe"
+Pop-Location
+```
+
+This uses an isolated profile and synthetic backend with the production
+authenticated proxy and DAP server. It tests actual Extension Host activation,
+attach, explicit daemon reuse, inspection, disconnect, durable host capture,
+and same-session native interval capture. The native case invokes the production
+command and Go helper, verifies one frontend and continued ordinary inspection,
+and normalizes the resulting synthetic packet capture.
+No vendor runtime or target is used. The command requires an explicit local
+editor, does not download it, and is not run by ordinary tests or release
+acceptance. Its ignored log/report records the tested editor version and
+scope; it is not visual UI or hardware qualification.
+
+`trace capture-editor` is the extension's private bounded NDJSON transport,
+not another attach command. It validates configuration locally and receives
+only forwarded native requests from the existing DebugSession. Native close
+is terminal: the extension ends helper stdin with that response, and the
+helper requires EOF before finalizing a successful private artifact. Keep
+the nonce, request identity, frame limits, pending-request fences, and
+same-session tracker replacement tests aligned when changing either side.
+
+## Zed checks
+
+The Zed source extension pins its Rust SDK and dependency lockfile. Prepare
+Rust 1.95.0, its formatting/lint components, the Wasm target, and dependency
+cache before offline release acceptance:
+
+```powershell
+rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2
+cargo +1.95.0 fetch --locked --manifest-path editors/zed/Cargo.toml
+cargo +1.95.0 fmt --manifest-path editors/zed/Cargo.toml --check
+cargo +1.95.0 test --locked --offline --manifest-path editors/zed/Cargo.toml
+cargo +1.95.0 clippy --locked --offline --manifest-path editors/zed/Cargo.toml --all-targets -- -D warnings
+cargo +1.95.0 build --locked --offline --release --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
+```
+
+CI checks the source extension on Windows and Linux; its runtime integration
+is local Windows only. Full and fast local release acceptance both check the
+extension's formatting, host tests, lint, and Wasm build. These commands do not
+launch Zed, acquire a daemon, or establish GUI/hardware acceptance. Build
+artifacts remain ignored and are not Windows daemon ZIP payloads.
 
 ## Documentation
 

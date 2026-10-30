@@ -549,6 +549,13 @@ try {
             Pop-Location
         }
     }
+    Invoke-ReleaseStep -Results $results -Name 'zed-extension' -Action {
+        $zedManifest = Join-Path $repositoryRoot 'editors\zed\Cargo.toml'
+        Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'fmt', '--manifest-path', $zedManifest, '--check') -Description 'Zed extension formatting'
+        Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'test', '--locked', '--offline', '--manifest-path', $zedManifest) -Description 'Zed extension host tests'
+        Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'clippy', '--locked', '--offline', '--manifest-path', $zedManifest, '--all-targets', '--', '-D', 'warnings') -Description 'Zed extension lint'
+        Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'build', '--locked', '--offline', '--release', '--target', 'wasm32-wasip2', '--manifest-path', $zedManifest) -Description 'Zed Wasm extension build'
+    }
     Invoke-ReleaseStep -Results $results -Name 'repository-language-tests' -Action {
         Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'tools.test_validate_repository_language') -Description 'repository language validator tests'
     }
