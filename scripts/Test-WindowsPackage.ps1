@@ -250,6 +250,107 @@ function Remove-OwnedTemporaryDirectory {
     Remove-Item -LiteralPath $resolvedPath -Recurse -Force
 }
 
+function Assert-PackageOfflineCLI {
+    param(
+        [Parameter(Mandatory)] [string]$Executable,
+        [Parameter(Mandatory)] [string]$FixtureDirectory
+    )
+
+    $helpText = @(& $Executable help) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "packaged help failed with exit code $LASTEXITCODE" }
+    foreach ($command in @('--perf-output', '--perf-max-events', 'profile import', 'trace capture', '--acknowledge-unverified-source', 'trace normalize', '--chrome-output')) {
+        if (-not $helpText.Contains($command)) { throw "packaged help is missing analysis command syntax: $command" }
+    }
+
+    [System.IO.Directory]::CreateDirectory($FixtureDirectory) | Out-Null
+    $encoding = [System.Text.UTF8Encoding]::new($false)
+    $csvPath = Join-Path $FixtureDirectory 'synthetic-profile.csv'
+    $mappingPath = Join-Path $FixtureDirectory 'synthetic-mapping.json'
+    $profileOutput = Join-Path $FixtureDirectory 'profile-report.json'
+    $mapping = [ordered]@{
+        schema = 'multi-dap.profile-mapping.v1'
+        multi_version = '8.1.4'
+        export_surface = 'profile_csvexport'
+        view = 'functions'
+        mode = 'history_performance'
+        provenance = 'synthetic_fixture'
+        filter_scope = 'unknown'
+        name_style = 'long'
+        list_layout = 'flat'
+        headers = @('Label', 'Seconds', 'Occurrences')
+        identity = @{ label = 'Label' }
+        line_basis = 'unavailable'
+        missing_tokens = @()
+        missing_policy = 'reject'
+        metrics = @(
+            @{ name = 'time'; column = 'Seconds'; semantic = 'time'; unit = 's'; attribution = 'vendor_unspecified' },
+            @{ name = 'calls'; column = 'Occurrences'; semantic = 'observed_calls'; unit = 'count'; attribution = 'vendor_unspecified' }
+        )
+    }
+    [System.IO.File]::WriteAllText($csvPath, "Label,Seconds,Occurrences`nPACKAGE_FIXTURE,0.125,18446744073709551615`n", $encoding)
+    [System.IO.File]::WriteAllText($mappingPath, ($mapping | ConvertTo-Json -Compress -Depth 6), $encoding)
+    $profileReceipt = & $Executable profile import --input $csvPath --mapping $mappingPath --output $profileOutput | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $profileReceipt.event -cne 'profile_imported' -or
+        $profileReceipt.rows -ne 1 -or $profileReceipt.vendor_qualified -ne $false -or
+        $profileReceipt.format_status -cne 'operator_mapped') {
+        throw 'packaged profile import failed the synthetic software smoke'
+    }
+    $profileText = [System.IO.File]::ReadAllText($profileOutput)
+    if (-not $profileText.Contains('18446744073709551615') -or -not $profileText.Contains('synthetic_fixture')) {
+        throw 'packaged profile import lost exact counts or synthetic provenance'
+    }
+
+    # Synthetic physical-time packets exercise the shipped normalizer, not
+    # native collection, vendor DLL loading, or hardware qualification.
+    $info = [byte[]]::new(64)
+    $info[8] = 3
+    $info[24] = 1
+    $context = [byte[]]::new(32)
+    $context[0] = 5
+    [System.BitConverter]::GetBytes([uint64]17).CopyTo($context, 16)
+    [System.BitConverter]::GetBytes([uint64]23).CopyTo($context, 24)
+    $enter = [byte[]]::new(32)
+    $enter[0] = 10
+    [System.BitConverter]::GetBytes([uint64]0x1234).CopyTo($enter, 8)
+    [System.BitConverter]::GetBytes([uint64]10).CopyTo($enter, 24)
+    $leave = [byte[]]$enter.Clone()
+    $leave[16] = 1
+    [System.BitConverter]::GetBytes([uint64]20).CopyTo($leave, 24)
+    $capture = [ordered]@{
+        schema = 'multi-dap.native-capture.v1'
+        multi_version = '8.1.4'
+        abi = @{
+            byte_order = 'little'; pointer_bits = 64; info_size = 64; packet_size = 32
+            packet_alignment = 8; type_offset = 0; reconstructed_offset = 1; address_offset = 8; payload_offset = 16
+        }
+        source = @{ kind = 'synthetic_fixture'; session_id = 0; source_id = 'package-software-fixture'; core_id = $null }
+        info_hex = [System.BitConverter]::ToString($info).Replace('-', '').ToLowerInvariant()
+        generations = @(@{
+            id = '1'; reason = 'initial'; first_index = '0'
+            packets_hex = @(
+                [System.BitConverter]::ToString($context).Replace('-', '').ToLowerInvariant(),
+                [System.BitConverter]::ToString($enter).Replace('-', '').ToLowerInvariant(),
+                [System.BitConverter]::ToString($leave).Replace('-', '').ToLowerInvariant()
+            )
+        })
+    }
+    $capturePath = Join-Path $FixtureDirectory 'synthetic-capture.json'
+    $nativeOutput = Join-Path $FixtureDirectory 'native-report.json'
+    $chromeOutput = Join-Path $FixtureDirectory 'native-trace.json'
+    [System.IO.File]::WriteAllText($capturePath, ($capture | ConvertTo-Json -Compress -Depth 6), $encoding)
+    $nativeReceipt = & $Executable trace normalize --input $capturePath --output $nativeOutput --chrome-output $chromeOutput | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $nativeReceipt.event -cne 'native_trace_normalized' -or
+        $nativeReceipt.vendor_qualified -ne $false -or $nativeReceipt.hardware_qualified -ne $false -or
+        $nativeReceipt.chrome_written -ne $true) {
+        throw 'packaged trace normalize failed the synthetic software smoke'
+    }
+    $nativeReport = Get-Content -LiteralPath $nativeOutput -Raw | ConvertFrom-Json
+    $chromeReport = Get-Content -LiteralPath $chromeOutput -Raw | ConvertFrom-Json
+    if ($null -eq $nativeReport -or @($chromeReport.traceEvents).Count -eq 0) {
+        throw 'packaged trace normalize did not produce both analysis artifacts'
+    }
+}
+
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("multi-dap-package-test-" + [guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
@@ -295,6 +396,8 @@ try {
     if ($actualCommit -cne $Commit.ToLowerInvariant()) {
         throw "packaged commit metadata mismatch: $versionOutput"
     }
+
+    Assert-PackageOfflineCLI -Executable (Join-Path $extractDirectory 'multi-dap.exe') -FixtureDirectory (Join-Path $temporaryRoot 'synthetic-analysis')
 
     Write-Output "reproducible SHA256 $left"
 } finally {
