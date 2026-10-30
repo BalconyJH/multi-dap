@@ -1,8 +1,8 @@
 # M6: Windows Delivery and Editor Integration Baseline
 
 This page defines the currently reproducible Windows deliverable and
-editor-integration evidence. The repository provides a VS Code local-proxy
-source extension, a field contract for native CLion Cidr DAP CMake Debug
+editor-integration evidence. The repository provides VS Code and Zed local-proxy
+source extensions, a field contract for native CLion Cidr DAP CMake Debug
 configuration, and CLion 2026.2.1 framing regressions. Host transport evidence
 and a limited native CLion hardware smoke test are recorded separately below;
 neither constitutes full execution, breakpoint-hit, or release qualification.
@@ -88,10 +88,18 @@ would connect to an operator session.
 
 Each step emits `PASS`, `FAIL`, or `SKIP` with its duration. The final line is CI-readable `RELEASE_ACCEPTANCE_RESULT` JSON; the process exits with `1` when any required step fails. During development, `-Mode Fast` runs ordinary Go test, vet, and both Python host-test suites. It explicitly skips race tests, MULTI embedded-runtime compilation, and dual-build package verification, and cannot be used for release.
 
+Both modes also check VS Code source tests and the Zed source extension's
+formatting, host tests, lint, and `wasm32-wasip2` build. Prepare Rust 1.95.0 and
+the locked Cargo dependency cache first, as described in the
+[developer guide](development.md#zed-checks). These source-editor checks do not
+launch an editor. Real VS Code Extension Host acceptance is an explicit
+separate command, and actual Zed GUI acceptance remains open.
+
 The package contains only:
 
 - `multi-dap.exe`
 - `bridge/bridge.py`
+- `bridge/mbp_wire.py`
 - `bridge/timemachine_helper.py`
 - `bridge/timemachine_native.py`
 - `examples/multi-dap.example.toml`
@@ -124,7 +132,9 @@ The native trace helper is selected strictly beside that selected `bridge.py`;
 its `timemachine_native.py` sibling must remain in the same directory. Explicit
 `--bridge-script` selection therefore selects the whole companion bundle, not
 a helper from the current directory, `PATH`, or another installation. The
-optional helper uses a standalone Python 3.8+ from the configured MULTI
+legacy wire helper `mbp_wire.py` is loaded only from the selected bridge's
+directory and is required even when native trace is unused. The optional
+native helper uses a standalone Python 3.8+ from the configured MULTI
 installation and only Python standard-library modules, with no system `pip`
 dependency. Python interpreters and vendor DLLs remain external prerequisites
 and are never included in the ZIP.
@@ -138,28 +148,55 @@ separate native-runtime and hardware evidence exists.
 The release workflow can generate a WinGet 1.12 multi-file manifest for the
 exact archive URL and digest. It uses a portable ZIP with
 `ArchiveBinariesDependOnPath: true` so the executable, bridge, and native helper
-companions stay together. Publication compares all three Python files with the
+companions stay together. Publication compares all four Python files with the
 tagged source, and WinGet staging verifies their installed digests against the
 release archive. See the [release guide](releasing.md) for publication gates and the
 reasons `uv` and Homebrew installation are deferred.
 
 ## VS Code: local-proxy extension
 
-[Official VS Code documentation](https://code.visualstudio.com/docs/debugtest/debugging-configuration) requires each `launch.json` configuration's `type` to be provided by an installed debug extension. The repository's `editors/vscode` directory provides the `multi-dap` debug type, a configuration provider, and a `DebugAdapterDescriptorFactory`; it starts only this supported local command:
+[Official VS Code documentation](https://code.visualstudio.com/docs/debugtest/debugging-configuration) requires each `launch.json` configuration's `type` to be provided by an installed debug extension. The repository's `editors/vscode` directory provides the `multi-dap` debug type, a configuration provider, and a `DebugAdapterDescriptorFactory`. Its default attach configuration starts this supported local command:
 
 ```text
 multi-dap proxy --config <absolute-project.toml> [--control-dir <absolute-directory>]
 ```
 
-It therefore connects only to a daemon the user has already started and can use the dynamic port produced by `endpoints.dap.port = 0` in TOML. `proxy` first authenticates the private control record. The authentication ACK is the protocol-upgrade boundary; the daemon immediately hands that same control socket to `dap.Server.ServeConnection`, without querying `status` first or dialing `DAPAddress` a second time. This eliminates the TOCTOU where a loopback listener is rebound after daemon exit. The extension does not read tokens and rejects `host`, `port`, and `debugServer`, avoiding a bypass of that authentication boundary. It does not start cold/warm `serve` itself, because those modes require bridge, session, and lifecycle inputs that the user must explicitly provide. The extension is fixed to run in the local UI extension host; a remote workspace is not a supported integration today.
+Without an acquisition choice, it connects only to a daemon the user has already started and can use the dynamic port produced by `endpoints.dap.port = 0` in TOML. `proxy` first authenticates the private control record. The authentication ACK is the protocol-upgrade boundary; the daemon immediately hands that same control socket to `dap.Server.ServeConnection`, without querying `status` first or dialing `DAPAddress` a second time. This eliminates the TOCTOU where a loopback listener is rebound after daemon exit. The extension does not read tokens and rejects `host`, `port`, and `debugServer`, avoiding a bypass of that authentication boundary. The extension is fixed to run in the local UI extension host; the provider and factory reject remote and virtual workspaces.
 
-`examples/vscode/launch.json` defines the only supported attach-configuration contract. After variable substitution, `configFile` (and optional `controlDirectory`) must be absolute paths. The extension source directory provides `npm test`, `npm run lint`, and `npm run package-contents`; the last enumerates publish contents with non-writing `npm pack --dry-run`.
+An explicit `acquisition` value of `"cold"` or `"warm"` enables a preceding
+`ensure` invocation. Both require `bridgeScript`; warm additionally requires
+the exact `primaryElf`, which cold rejects. The extension waits for successful
+exit and a complete `ready`/`already_ready` receipt before returning the proxy
+descriptor. Arguments use no shell, output is bounded to 16 KiB per stream,
+and the host deadline is 120 seconds. The same optional `controlDirectory`
+applies to both commands. There is no acquisition fallback or automatic retry.
+A timed-out `ensure` does not prove that no daemon was created: inspect
+config-bound `diagnose` and `status` before deciding whether to retry.
 
-## Zed: TCP field exists; adapter registration remains missing
+`examples/vscode/launch.json` provides the default attach configuration.
+Every supplied path must be fully qualified after variable substitution and
+contain no control characters. Windows root-relative, drive-relative, and
+device paths are rejected. See the source extension README for optional
+acquisition and capture examples. The extension source directory provides
+`npm test`, `npm run lint`, and `npm run package-contents`; the last enumerates
+publish contents with non-writing `npm pack --dry-run`. These host checks
+do not establish real VS Code GUI or acquisition acceptance.
 
-[Zed Debugger documentation](https://zed.dev/docs/debugger) confirms that a `.zed/debug.json` task needs `adapter` and `label` and may have `tcp_connection`; it also states adapters are supplied by built-in support or a language extension. The documentation does not establish that an arbitrary unregistered adapter name can start from `debug.json` alone, so this repository does not fabricate a Zed JSON configuration for `multi-dap`.
+## Zed: registered source extension
 
-Follow-up work is to implement/register a Zed adapter and validate its TCP connection field, `attach` initialization sequence, and stopped-target disconnect behavior with a real daemon. Zed can read `.vscode/launch.json`, but that does not replace adapter registration.
+`editors/zed` contains the registered adapter, strict JSON schema, pinned Rust
+SDK and lockfile, and host tests. It builds a `wasm32-wasip2` source extension
+and starts only `proxy --config ...` on local Windows. The extension does not
+acquire a daemon, download a binary, read tokens, or accept TCP templates.
+Its transport configuration is consumed as proxy arguments; the DAP attach
+body remains empty.
+
+See [Zed configuration](zed.md) for development installation and settings.
+Host tests and Wasm compilation qualify the implementation only: actual Zed
+installation, GUI attach/inspection/disconnect, and target acceptance remain
+open. SDK 0.7.0 cannot reliably identify remote Windows worktrees; no remote
+integration is claimed. The source extension is not published to the registry
+or included in the Windows daemon ZIP.
 
 ## CLion: Cidr DAP CMake Debug and ensure
 
