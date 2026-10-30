@@ -14,6 +14,8 @@ __pycache__/
 /docs/.venv/
 /editors/vscode/node_modules/
 /editors/vscode/*.vsix
+/editors/zed/target/
+/editors/zed/extension.wasm
 coverage.out
 *.test
 

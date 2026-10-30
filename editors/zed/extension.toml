@@ -1,0 +1,10 @@
+id = "multi-dap"
+name = "multi-dap"
+version = "0.1.0"
+schema_version = 1
+authors = ["Tacrolimus"]
+description = "Local authenticated multi-dap integration for Green Hills MULTI"
+repository = "https://github.com/Tacrolimus/multi-dap"
+
+[debug_adapters.multi-dap]
+schema_path = "debug_adapter_schemas/multi-dap.json"

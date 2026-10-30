@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "multi-dap attach",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Display name for this Zed debug task."
+    },
+    "adapter": {
+      "type": "string",
+      "const": "multi-dap"
+    },
+    "request": {
+      "type": "string",
+      "const": "attach",
+      "description": "Attach to an existing local authenticated multi-dap daemon."
+    },
+    "configFile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Fully qualified Windows path to the private multi-dap project TOML. Task variables are not supported."
+    },
+    "controlDirectory": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional fully qualified Windows path to the same private control directory used by the existing daemon."
+    },
+    "perfOutput": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional fully qualified Windows path to a new private host-latency capture file in an existing directory. Existing files are never overwritten."
+    },
+    "perfMaxEvents": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000,
+      "description": "Optional retained-event limit. Requires perfOutput; omission uses the daemon CLI recorder default."
+    }
+  },
+  "required": ["request", "configFile"],
+  "dependencies": {
+    "perfMaxEvents": ["perfOutput"]
+  },
+  "additionalProperties": false
+}

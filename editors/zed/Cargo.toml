@@ -1,0 +1,23 @@
+[package]
+name = "multi-dap-zed"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+license = "MIT"
+description = "Local authenticated multi-dap integration for Zed"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+zed_extension_api = "=0.7.0"
+
+[dev-dependencies]
+toml = "0.9"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
