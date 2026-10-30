@@ -30,6 +30,7 @@ hardware-observed evidence level. Zed remains unsupported.
 - [Architecture and design](docs/architecture.md)
 - [Capabilities and development status](docs/capabilities.md)
 - [Performance timeline](docs/performance.md)
+- [Native performance analysis](docs/native-analysis.md)
 - [MULTI 8 adaptation study](docs/ghs-8-adaptation.md)
 - [Operations guide](docs/operations.md)
 - [Developer guide](docs/development.md)
@@ -170,6 +171,24 @@ See [performance capture and interpretation](docs/performance.md) for limits,
 health counters, privacy, and CLion usage. The
 [MULTI 8 adaptation study](docs/ghs-8-adaptation.md) separates the implemented
 host timeline from native TimeMachine and Profiler qualification requirements.
+
+Offline target-data analysis is also available through `profile import` with
+an explicit column/semantics mapping, and `trace normalize` for multi-dap's
+versioned raw-packet capture envelope. These commands do not acquire a target,
+guess a vendor CSV schema, or parse `.dsnap` files. See
+[native performance analysis](docs/native-analysis.md) for the exact formats,
+clock/privacy boundaries, and remaining native runtime qualification.
+
+An experimental `multi-dap/trace/*` DAP surface also connects an explicitly
+selected TimeMachine session through a daemon-owned Python 3.8+ helper.
+It uses the existing frontend ownership and configuration barrier, bounded
+reads, generation fencing, and local recovery receipts. Start and stop each
+require explicit authorization; ordinary DAP startup does not create a native
+collector. Source/core association is operator-declared and real native/runtime
+acceptance remains open. `trace capture` reads one bounded interval through
+this same config-bound DAP path and writes a private capture for
+`trace normalize`; it does not start a daemon or collection. An editor capture
+button is not yet provided.
 
 ## Validation
 

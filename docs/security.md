@@ -67,6 +67,48 @@ Recording does not add target operations or bypass the actor's execution
 policy. Its payload-free guarantee does not extend to the separately requested
 native/profile artifacts described below.
 
+### Explicit offline native analysis
+
+Unlike the payload-free host timeline, the
+[offline native analysis](native-analysis.md) artifacts may contain symbols,
+source labels, addresses, task identities, and raw trace evidence. They are
+written only to explicit new private output files; routine status and error
+strings exclude those contents. Inputs use bounded strict formats, explicit
+semantics, and regular-file identity checks. A caller-supplied mapping or
+capture assertion never upgrades vendor/runtime/hardware qualification.
+
+The separate native mechanism does not load a DLL on import or static
+inspection. Explicit initialization binds an exact supported release, PE
+architecture, exports, and DLL digest, with restricted dependency search and a
+file handle preventing DLL replacement during verification/loading. Native
+calls have one process/thread owner. Callback payloads are bounded and never
+synchronously reenter actor code.
+
+The experimental native DAP surface uses actor/frontend/control-lease fencing,
+bounded subprocess deadlines, and explicit start/stop admission. Client
+requests cannot choose a helper executable, script, DLL, or output path.
+Native status/error messages are fixed-category metadata; explicit read
+batches are sensitive artifacts and clients must store them privately.
+The existing config-bound authenticated proxy remains the supported entry
+point; no additional native-control listener is created.
+
+Windows gives the helper a non-inherited kill-on-close Job and separate
+inherited source/configured-probe lifetime handles. Parent death cannot release
+those handles while an owned helper is still running. Ordinary invalidation
+aborts only that helper, without issuing implicit native stop/disconnect.
+Uncertain source leases remain held until daemon shutdown; actual reaping,
+not an abort request, gates release. Killing a helper does not establish that
+hardware trace collection stopped.
+
+An explicit nonzero trace session and acknowledgement of unverified source
+association are mandatory. The conservative source lock covers cooperating
+daemons in the same Windows logon session, not arbitrary external tools.
+Neither a declared core nor an image/snapshot digest proves the session's
+association with the daemon's actual target. The requests therefore retain
+false native/hardware qualification flags until that binding is established
+by separate acceptance evidence. Python 2 legacy DAP support does not imply
+support for the Python 3.8+ native modules.
+
 ## Fail-closed requirements
 
 - Ambiguous core or source identity is an error, never a first-match choice.
