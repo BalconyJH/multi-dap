@@ -71,6 +71,91 @@ func TestNewRecorderLimits(t *testing.T) {
 	}
 }
 
+func TestRecorderDisconnectBoundaryRequiresCompleteCorrelatedResponse(t *testing.T) {
+	response := responseWire(1, 1, "disconnect", true)
+	for split := 0; split <= len(response); split++ {
+		t.Run(fmt.Sprint(split), func(t *testing.T) {
+			recorder, at := recorderAt(t, 10)
+			at(time.Microsecond)
+			write(t, recorder.ClientWriter(), requestWire(1, "disconnect"))
+			at(3 * time.Microsecond)
+			write(t, recorder.ServerWriter(), response[:split])
+			if split != len(response) {
+				if _, ready := recorder.FinishOnDisconnect(); ready {
+					t.Fatal("partial disconnect response ended the capture")
+				}
+			}
+			at(5 * time.Microsecond)
+			write(t, recorder.ServerWriter(), append(response[split:], eventWire(2, "terminated")...))
+			trace, ready := recorder.FinishOnDisconnect()
+			if !ready {
+				t.Fatal("complete matching disconnect response did not end capture")
+			}
+			meta := trace.OtherData
+			if meta.FinalizationBoundary != "disconnect_response" || meta.ProxyExitObserved ||
+				meta.ProxyFailed || !meta.CaptureComplete || meta.CompletedRequests != 1 ||
+				meta.ObservedEvents != 0 || len(dataEvents(trace)) != 1 {
+				t.Fatalf("disconnect boundary = %#v", meta)
+			}
+			write(t, recorder.ClientWriter(), requestWire(2, "threads"))
+			write(t, recorder.ServerWriter(), eventWire(3, "output"))
+			if _, ready := recorder.FinishOnDisconnect(); ready {
+				t.Fatal("disconnect finalization repeated")
+			}
+			later, _ := json.Marshal(recorder.Finish(true))
+			original, _ := json.Marshal(trace)
+			if !bytes.Equal(later, original) {
+				t.Fatal("later transport activity changed a finalized observation interval")
+			}
+		})
+	}
+}
+
+func TestRecorderDisconnectBoundaryRejectsFailureMismatchAndAmbiguity(t *testing.T) {
+	validRequest := requestWire(1, "disconnect")
+	validResponse := responseWire(1, 1, "disconnect", true)
+	for _, test := range []struct {
+		name     string
+		request  []byte
+		response []byte
+	}{
+		{"failed", validRequest, responseWire(1, 1, "disconnect", false)},
+		{"unmatched", validRequest, responseWire(1, 2, "disconnect", true)},
+		{"command-mismatch", requestWire(1, "threads"), validResponse},
+		{"duplicate-request", append(validRequest, validRequest...), validResponse},
+		{"ambiguous-request-command", wire(`{"seq":1,"type":"request","command":"threads","command":"disconnect"}`), validResponse},
+		{"ambiguous-response-command", validRequest, wire(`{"seq":1,"type":"response","request_seq":1,"command":"threads","command":"disconnect","success":true}`)},
+		{"ambiguous-response-sequence", validRequest, wire(`{"seq":1,"type":"response","request_seq":2,"request_seq":1,"command":"disconnect","success":true}`)},
+		{"ambiguous-response-success", validRequest, wire(`{"seq":1,"type":"response","request_seq":1,"command":"disconnect","success":false,"success":true}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder, _ := recorderAt(t, 10)
+			write(t, recorder.ClientWriter(), test.request)
+			write(t, recorder.ServerWriter(), test.response)
+			if _, ready := recorder.FinishOnDisconnect(); ready {
+				t.Fatal("unconfirmed disconnect response finalized capture")
+			}
+			meta := recorder.Finish(false).OtherData
+			if !meta.ProxyExitObserved || meta.FinalizationBoundary != "proxy_exit" {
+				t.Fatalf("ordinary finalization = %#v", meta)
+			}
+		})
+	}
+}
+
+func TestRecorderDisconnectBoundaryRetainsIncompleteEvidence(t *testing.T) {
+	recorder, _ := recorderAt(t, 1)
+	write(t, recorder.ClientWriter(), requestWire(1, "threads"))
+	write(t, recorder.ClientWriter(), requestWire(2, "disconnect"))
+	write(t, recorder.ServerWriter(), eventWire(1, "output"))
+	write(t, recorder.ServerWriter(), responseWire(2, 2, "disconnect", true))
+	trace, ready := recorder.FinishOnDisconnect()
+	if !ready || trace.OtherData.CaptureComplete || trace.OtherData.UnfinishedRequests != 1 ||
+		trace.OtherData.DroppedEvents != 1 || trace.OtherData.ProxyExitObserved {
+		t.Fatalf("incomplete disconnect snapshot = (%#v, %v)", trace.OtherData, ready)
+	}
+}
+
 func TestRecorderSplitFrames(t *testing.T) {
 	request := requestWire(1, "threads")
 	response := responseWire(1, 1, "threads", true)

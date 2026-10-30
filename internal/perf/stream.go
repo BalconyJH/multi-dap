@@ -81,6 +81,9 @@ func (r *Recorder) observe(direction *stream, data []byte, client bool) {
 			r.request(message, timestamp)
 		case !client && message.kind == "response":
 			r.response(message, timestamp)
+			if r.disconnectReady {
+				return
+			}
 		case !client && message.kind == "event":
 			r.event(message, timestamp)
 		default:
@@ -148,6 +151,12 @@ func decodeMessage(body []byte) (message, bool) {
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return message{}, false
 	}
+	// Ordinary observation does not interpret unknown payload fields. Before
+	// using disconnect as a durable boundary, also reject duplicate envelope
+	// keys whose last-value decoding could make that boundary ambiguous.
+	if envelope.Command == "disconnect" && !uniqueEnvelopeKeys(body) {
+		return message{}, false
+	}
 	validSeq := func(value int64) bool { return value > 0 && value <= 1<<31-1 }
 	if !validSeq(envelope.Seq) {
 		return message{}, false
@@ -174,4 +183,30 @@ func decodeMessage(body []byte) (message, bool) {
 		return message{}, false
 	}
 	return result, true
+}
+
+func uniqueEnvelopeKeys(body []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		return false
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		name, ok := token.(string)
+		if err != nil || !ok {
+			return false
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return false
+		}
+		seen[name] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return false
+		}
+	}
+	closing, err := decoder.Token()
+	return err == nil && closing == json.Delim('}')
 }

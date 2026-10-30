@@ -78,6 +78,8 @@ type Metadata struct {
 	ClientObservationDisabled bool             `json:"client_observation_disabled"`
 	ServerObservationDisabled bool             `json:"server_observation_disabled"`
 	ProxyFailed               bool             `json:"proxy_failed"`
+	ProxyExitObserved         bool             `json:"proxy_exit_observed"`
+	FinalizationBoundary      string           `json:"finalization_boundary"`
 	CaptureComplete           bool             `json:"capture_complete"`
 	RequestSummary            []RequestSummary `json:"request_summary"`
 }
@@ -107,6 +109,10 @@ type Recorder struct {
 	lastNS   int64
 	finished bool
 	frozen   Trace
+	// A successful, correlated disconnect ends this DAP observation interval,
+	// even if the editor keeps its stdin pipe open until it kills the proxy.
+	disconnectReady bool
+	disconnectNS    int64
 
 	client stream
 	server stream
@@ -158,7 +164,7 @@ func (o observer) Write(data []byte) (int, error) {
 	r := o.recorder
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.finished {
+	if !r.finished && !r.disconnectReady {
 		direction := &r.server
 		if o.client {
 			direction = &r.client
@@ -174,10 +180,34 @@ func (o observer) Write(data []byte) (int, error) {
 func (r *Recorder) Finish(proxyFailed bool) Trace {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.finishLocked(proxyFailed, true)
+}
+
+// FinishOnDisconnect freezes the observation interval only after a complete,
+// unambiguous response succeeds for its matching disconnect request. A caller
+// can persist this snapshot before forwarding the response's final bytes.
+// Later transport errors are outside this explicit observation boundary.
+func (r *Recorder) FinishOnDisconnect() (Trace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finished || !r.disconnectReady {
+		return Trace{}, false
+	}
+	return r.finishLocked(false, false), true
+}
+
+func (r *Recorder) finishLocked(proxyFailed, proxyExitObserved bool) Trace {
 	if r.finished {
 		return cloneTrace(r.frozen)
 	}
-	r.meta.DurationUS = micros(r.timestamp())
+	r.meta.ProxyExitObserved = proxyExitObserved
+	r.meta.FinalizationBoundary = "proxy_exit"
+	if proxyExitObserved {
+		r.meta.DurationUS = micros(r.timestamp())
+	} else {
+		r.meta.FinalizationBoundary = "disconnect_response"
+		r.meta.DurationUS = micros(r.disconnectNS)
+	}
 	for _, direction := range []*stream{&r.client, &r.server} {
 		if !direction.disabled && direction.partial() {
 			r.disable(direction)
@@ -311,6 +341,10 @@ func (r *Recorder) response(message message, timestamp int64) {
 		TID: request.lane + 2, Args: EventArgs{RequestSeq: message.requestSeq, Success: &success},
 	}) {
 		r.usedLanes[request.lane] = true
+	}
+	if request.command == "disconnect" && message.success {
+		r.disconnectReady = true
+		r.disconnectNS = timestamp
 	}
 }
 
