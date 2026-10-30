@@ -132,8 +132,9 @@ Tags:
 ReleaseNotesUrl: $releaseUrl
 InstallationNotes: >-
   Configure a private project TOML and a licensed Green Hills MULTI installation
-  before starting the daemon. The package includes bridge/bridge.py, which the
-  installed executable discovers relative to its own location.
+  before starting the daemon. The installed executable discovers bridge/bridge.py
+  relative to its own location. Keep its required mbp_wire.py companion in that
+  same directory.
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0
 "@

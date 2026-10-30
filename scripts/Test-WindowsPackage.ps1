@@ -23,6 +23,7 @@ function Assert-PackageArchive {
         'SHA256SUMS.txt',
         'THIRD_PARTY_NOTICES.md',
         'bridge/bridge.py',
+        'bridge/mbp_wire.py',
         'bridge/timemachine_helper.py',
         'bridge/timemachine_native.py',
         'editors/clion/README.md',
@@ -73,7 +74,7 @@ function Assert-PackageArchive {
                 throw "package README is missing CLion integration contract: $requiredText"
             }
         }
-        foreach ($requiredText in @('timemachine_helper.py', 'timemachine_native.py', 'Python 3.8+', 'same directory as the selected', 'does not require pip')) {
+        foreach ($requiredText in @('mbp_wire.py', 'timemachine_helper.py', 'timemachine_native.py', 'Python 3.8+', 'same directory as the selected', 'does not require pip')) {
             if ($readmeText.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
                 throw "package README is missing the native trace packaging contract: $requiredText"
             }
@@ -185,6 +186,11 @@ function Assert-PackageArchive {
                 $stream.Dispose()
             }
             if ($actual -ne $digest) { throw "manifest digest mismatch: $path" }
+            if ($path -in @('bridge/bridge.py', 'bridge/mbp_wire.py', 'bridge/timemachine_helper.py', 'bridge/timemachine_native.py')) {
+                $sourcePath = Join-Path $PSScriptRoot (Join-Path '..' $path)
+                $sourceDigest = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -ne $sourceDigest) { throw "bridge companion differs from source: $path" }
+            }
         }
         if (@($manifestPaths | Group-Object | Where-Object Count -gt 1).Count -ne 0) {
             throw 'manifest contains duplicate paths'

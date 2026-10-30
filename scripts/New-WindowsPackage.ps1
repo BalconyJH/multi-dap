@@ -130,6 +130,7 @@ try {
     }
 
     Copy-PackageFile -Source (Join-Path $repositoryRoot 'bridge\bridge.py') -Destination (Join-Path $stage 'bridge\bridge.py') -Timestamp $timestamp
+    Copy-PackageFile -Source (Join-Path $repositoryRoot 'bridge\mbp_wire.py') -Destination (Join-Path $stage 'bridge\mbp_wire.py') -Timestamp $timestamp
     Copy-PackageFile -Source (Join-Path $repositoryRoot 'bridge\timemachine_helper.py') -Destination (Join-Path $stage 'bridge\timemachine_helper.py') -Timestamp $timestamp
     Copy-PackageFile -Source (Join-Path $repositoryRoot 'bridge\timemachine_native.py') -Destination (Join-Path $stage 'bridge\timemachine_native.py') -Timestamp $timestamp
     Copy-PackageFile -Source (Join-Path $repositoryRoot 'editors\clion\README.md') -Destination (Join-Path $stage 'editors\clion\README.md') -Timestamp $timestamp

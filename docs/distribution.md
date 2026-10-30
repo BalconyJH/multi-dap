@@ -1,7 +1,8 @@
 # Windows Distribution Guide
 
 `multi-dap` is distributed as a self-contained Windows amd64 ZIP. The bundle
-contains the Go executable and its required `bridge/bridge.py` companion; it
+contains the Go executable and its required `bridge/bridge.py` and
+`bridge/mbp_wire.py` companions; it
 does not include Green Hills MULTI, a target server, firmware, or a completed
 project configuration.
 
@@ -69,8 +70,9 @@ Get-Content -LiteralPath "$destination\SHA256SUMS.txt" | ForEach-Object {
 }
 ```
 
-Only extract into a new versioned directory. Do not mix an executable from one
-bundle with `bridge/bridge.py` from another bundle.
+Only extract into a new versioned directory. Keep the executable and all Python
+companions from the same bundle together; do not replace individual bridge or
+helper files with files from another release.
 
 ## Manual install and first smoke test
 
@@ -80,6 +82,9 @@ After verification, key package entries include:
 multi-dap-<version>-windows-amd64/
   multi-dap.exe
   bridge/bridge.py
+  bridge/mbp_wire.py
+  bridge/timemachine_helper.py
+  bridge/timemachine_native.py
   examples/multi-dap.example.toml
   SHA256SUMS.txt
   release-provenance.json

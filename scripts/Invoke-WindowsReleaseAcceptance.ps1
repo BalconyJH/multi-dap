@@ -583,6 +583,7 @@ try {
                     [System.IO.Directory]::CreateDirectory($compileDirectory) | Out-Null
                     $sources = @(
                         (Join-Path $repositoryRoot 'bridge\bridge.py'),
+                        (Join-Path $repositoryRoot 'bridge\mbp_wire.py'),
                         (Join-Path $repositoryRoot 'recon\lib\reconlib.py'),
                         (Join-Path $repositoryRoot 'recon\run.py'),
                         (Join-Path $repositoryRoot 'recon\tools\p02_client.py'),

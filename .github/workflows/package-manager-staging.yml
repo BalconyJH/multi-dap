@@ -182,6 +182,7 @@ jobs:
             'SHA256SUMS.txt'
             'THIRD_PARTY_NOTICES.md'
             'bridge/bridge.py'
+            'bridge/mbp_wire.py'
             'bridge/timemachine_helper.py'
             'bridge/timemachine_native.py'
             'editors/clion/README.md'
@@ -206,6 +207,7 @@ jobs:
           cmp packaging/README.md extracted/README.md
           cmp THIRD_PARTY_NOTICES.md extracted/THIRD_PARTY_NOTICES.md
           cmp bridge/bridge.py extracted/bridge/bridge.py
+          cmp bridge/mbp_wire.py extracted/bridge/mbp_wire.py
           cmp bridge/timemachine_helper.py extracted/bridge/timemachine_helper.py
           cmp bridge/timemachine_native.py extracted/bridge/timemachine_native.py
           cmp editors/clion/README.md extracted/editors/clion/README.md
@@ -389,7 +391,7 @@ jobs:
           }
           $installedRoot = Split-Path -Parent $installedExecutable
           $expectedRoot = (Resolve-Path -LiteralPath .\expected-payload).Path
-          foreach ($companion in @('bridge\bridge.py', 'bridge\timemachine_helper.py', 'bridge\timemachine_native.py')) {
+          foreach ($companion in @('bridge\bridge.py', 'bridge\mbp_wire.py', 'bridge\timemachine_helper.py', 'bridge\timemachine_native.py')) {
             $installedCompanion = Join-Path $installedRoot $companion
             $expectedCompanion = Join-Path $expectedRoot $companion
             if (-not (Test-Path -LiteralPath $installedCompanion -PathType Leaf)) {

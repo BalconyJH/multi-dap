@@ -11,6 +11,7 @@ helper require Python 3.8+ and are not imported by the Python 2 bridge.
 ```
 multi-dap.exe
 bridge/bridge.py
+bridge/mbp_wire.py
 bridge/timemachine_helper.py
 bridge/timemachine_native.py
 editors/clion/README.md
@@ -49,6 +50,12 @@ Copy-Item .\examples\multi-dap.example.toml C:\private\project.toml
 Use `--bridge-script <absolute-path>` only when intentionally selecting a
 different bridge. `multi-dap version` prints the embedded product version,
 source commit when present, and reproducible build timestamp as JSON.
+
+`mbp_wire.py` is a required Python 2.7/3 companion in the same directory as the
+selected `bridge.py`. The bridge loads this exact sibling source for bounded
+MBP framing and UTF-8 conversion; it does not search the working directory or
+reuse a cached same-name module. Keep both files together when selecting an
+explicit bridge path.
 
 The native trace helper is resolved from the same directory as the selected
 `bridge.py`: keep `timemachine_helper.py` and `timemachine_native.py` beside it,

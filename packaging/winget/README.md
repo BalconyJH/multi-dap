@@ -1,7 +1,7 @@
 # WinGet Packaging
 
 `multi-dap` is distributed as a ZIP containing a portable executable and its
-required `bridge/bridge.py` companion. The generated WinGet installer manifest
+required bridge and helper companions. The generated WinGet installer manifest
 uses `ArchiveBinariesDependOnPath: true`, so WinGet keeps the extracted bundle
 together and places its install directory on `PATH`.
 
@@ -64,8 +64,9 @@ A dependent `windows-2025` job treats the runner as a clean host. It requires
 manifest after explicitly enabling WinGet's `LocalManifestFiles` setting, uses
 user-scope and noninteractive flags when the installed WinGet version supports
 them, verifies `multi-dap version` reports the exact release version,
-verifies the executable-relative `bridge/bridge.py` exists and matches the
-released archive, uninstalls the exact package ID, confirms that `multi-dap` no
+verifies that executable-relative `bridge/bridge.py`, `bridge/mbp_wire.py`,
+`bridge/timemachine_helper.py`, and `bridge/timemachine_native.py` exist and
+match the released archive, uninstalls the exact package ID, confirms that `multi-dap` no
 longer resolves through `PATH`, and disables the temporary local-manifest
 setting in an always-run cleanup step.
 
