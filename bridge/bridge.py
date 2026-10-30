@@ -11,15 +11,32 @@ import re
 import socket
 import shutil
 import tempfile
+import types
 
-try:
-    unicode
-except NameError:  # Python 3 host tests; MULTI itself supplies these names.
-    unicode = str
-    long = int
-    binary_type = bytes
-else:
-    binary_type = str
+
+def _load_wire():
+    # GHS_ExecFile sets __file__ to the selected -f script. Load only its
+    # sibling source, never a working-directory or cached same-name module.
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mbp_wire.py")
+    module = types.ModuleType("_multi_dap_mbp_wire")
+    module.__file__ = path
+    with open(path, "rb") as source:
+        code = compile(source.read(), path, "exec")
+    eval(code, module.__dict__)
+    return module
+
+
+_wire = _load_wire()
+unicode = _wire.unicode
+long = _wire.long
+binary_type = _wire.binary_type
+BridgeError = _wire.BridgeError
+as_unicode = _wire.as_unicode
+multi_text = _wire.multi_text
+json_value = _wire.json_value
+encode_frame = _wire.encode_frame
+decode_frame = _wire.decode_frame
+BoundedNDJSONReader = _wire.BoundedNDJSONReader
 
 
 PROTOCOL_VERSION = 1
@@ -45,15 +62,6 @@ MAX_MEMORY_READ_BYTES = 64 * 1024
 MAX_DISASSEMBLE_BYTES = 48 * 1024 + 6
 MAX_DISASSEMBLE_OUTPUT_BYTES = 1 << 20
 COMPONENT_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*\.[0-9]+$")
-
-
-class BridgeError(Exception):
-    """A request failure that has a defined MBP error envelope."""
-
-    def __init__(self, kind, message):
-        Exception.__init__(self, message)
-        self.kind = kind
-        self.message = message
 
 
 def _ascii_host(value):
@@ -96,111 +104,6 @@ def validate_rpc_host(host):
     if text == u"::1":
         return text
     raise ValueError("rpc host must be a numeric loopback IP literal")
-
-
-def as_unicode(value):
-    """Return a JSON string value as unicode, rejecting non-UTF-8 input."""
-    if isinstance(value, unicode):
-        return value
-    if isinstance(value, binary_type):
-        return value.decode("utf-8")
-    raise BridgeError("invalid_params", "expected a UTF-8 string")
-
-
-def multi_text(value):
-    """Make MULTI output safe for the UTF-8 wire and report lossiness."""
-    if value is None:
-        return u"", False
-    if isinstance(value, unicode):
-        return value, False
-    if isinstance(value, binary_type):
-        try:
-            return value.decode("utf-8"), False
-        except UnicodeDecodeError:
-            return value.decode("utf-8", "replace"), True
-    return unicode(value), False
-
-
-def json_value(value):
-    """Recursively convert MULTI values to JSON values with unicode strings."""
-    if isinstance(value, unicode):
-        return value, False
-    if isinstance(value, binary_type):
-        return multi_text(value)
-    if isinstance(value, dict):
-        result = {}
-        lossy = False
-        for key, item in value.items():
-            text_key, key_lossy = multi_text(key)
-            text_item, item_lossy = json_value(item)
-            result[text_key] = text_item
-            lossy = lossy or key_lossy or item_lossy
-        return result, lossy
-    if isinstance(value, (list, tuple)):
-        result = []
-        lossy = False
-        for item in value:
-            text_item, item_lossy = json_value(item)
-            result.append(text_item)
-            lossy = lossy or item_lossy
-        return result, lossy
-    if value is None or isinstance(value, (bool, int, long, float)):
-        return value, False
-    return multi_text(value)
-
-
-def encode_frame(frame):
-    """Encode one frame as a UTF-8 NDJSON line."""
-    text = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
-    if not isinstance(text, unicode):
-        text = text.decode("utf-8")
-    return text.encode("utf-8") + b"\n"
-
-
-def decode_frame(line):
-    """Decode one UTF-8 JSON object frame."""
-    try:
-        text = line.decode("utf-8")
-    except UnicodeDecodeError:
-        raise BridgeError("protocol_error", "frame is not valid UTF-8")
-    try:
-        value = json.loads(text)
-    except (TypeError, ValueError):
-        raise BridgeError("protocol_error", "frame is not valid JSON")
-    if not isinstance(value, dict):
-        raise BridgeError("protocol_error", "frame must be a JSON object")
-    return value
-
-
-class BoundedNDJSONReader(object):
-    """Read newline-delimited frames without buffering an unbounded line."""
-
-    def __init__(self, connection, max_message_size):
-        self.connection = connection
-        self.max_message_size = max_message_size
-        self.buffer = b""
-
-    def read(self):
-        while True:
-            newline = self.buffer.find(b"\n")
-            if newline >= 0:
-                line = self.buffer[:newline]
-                self.buffer = self.buffer[newline + 1:]
-                if line.endswith(b"\r"):
-                    line = line[:-1]
-                if len(line) > self.max_message_size:
-                    raise BridgeError("protocol_error", "frame exceeds max_message_size")
-                return line
-            if len(self.buffer) > self.max_message_size:
-                raise BridgeError("protocol_error", "frame exceeds max_message_size")
-            chunk = self.connection.recv(4096)
-            if not chunk:
-                if self.buffer:
-                    raise BridgeError("protocol_error", "frame is not terminated by newline")
-                return None
-            self.buffer += chunk
-            if len(self.buffer) > self.max_message_size and b"\n" not in self.buffer:
-                raise BridgeError("protocol_error", "frame exceeds max_message_size")
 
 
 class MultiBridge(object):

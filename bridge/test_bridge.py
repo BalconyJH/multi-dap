@@ -668,5 +668,77 @@ class BridgeTest(unittest.TestCase):
         os.rmdir(temporary)
 
 
+class WireLoadingTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.mkdtemp(prefix="multi-dap-wire-test-")
+        self.selected = os.path.join(self.directory, "selected")
+        self.unrelated = os.path.join(self.directory, "unrelated")
+        os.mkdir(self.selected)
+        os.mkdir(self.unrelated)
+        self.script = os.path.join(self.selected, "bridge.py")
+        original = os.path.dirname(os.path.abspath(__file__))
+        shutil.copyfile(os.path.join(original, "bridge.py"), self.script)
+        shutil.copyfile(os.path.join(original, "mbp_wire.py"),
+                        os.path.join(self.selected, "mbp_wire.py"))
+        self.cwd = os.getcwd()
+        self.path = list(sys.path)
+        self.cached = dict((name, sys.modules.get(name)) for name in
+                           ("mbp_wire", "_multi_dap_mbp_wire", "bridge.mbp_wire"))
+        self.poison = types.ModuleType("poison")
+        for name in self.cached:
+            sys.modules[name] = self.poison
+        with open(os.path.join(self.unrelated, "mbp_wire.py"), "wb") as output:
+            output.write(b'raise RuntimeError("working-directory helper executed")\n')
+        os.chdir(self.unrelated)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        sys.path[:] = self.path
+        for name, previous in self.cached.items():
+            if previous is None:
+                del sys.modules[name]
+            else:
+                sys.modules[name] = previous
+        shutil.rmtree(self.directory)
+
+    def execute_script(self, run_main=False):
+        scope = {"__name__": "__main__" if run_main else "ghs_script_fixture",
+                 "__file__": self.script}
+        with open(self.script, "rb") as source:
+            eval(compile(source.read(), self.script, "exec"), scope)
+        return scope
+
+    def test_ghs_script_globals_load_only_selected_sibling_source(self):
+        scope = self.execute_script()
+        self.assertEqual(os.path.join(self.selected, "mbp_wire.py"),
+                         scope["_wire"].__file__)
+        self.assertEqual(b'{"id":1}\n', scope["encode_frame"]({"id": 1}))
+        self.assertEqual(self.path, sys.path)
+        for name in self.cached:
+            self.assertIs(self.poison, sys.modules[name])
+
+    def test_missing_and_corrupt_sibling_fail_before_runtime_creation(self):
+        helper = os.path.join(self.selected, "mbp_wire.py")
+        previous_socket = socket.socket
+        calls = []
+
+        def unexpected_socket(*args, **kwargs):
+            calls.append("socket")
+            raise AssertionError("socket created before helper validation")
+
+        socket.socket = unexpected_socket
+        try:
+            os.unlink(helper)
+            with self.assertRaises(IOError):
+                self.execute_script(run_main=True)
+            with open(helper, "wb") as output:
+                output.write(b"not valid python !!!\n")
+            with self.assertRaises(SyntaxError):
+                self.execute_script(run_main=True)
+            self.assertEqual([], calls)
+        finally:
+            socket.socket = previous_socket
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -319,9 +319,6 @@ func TestBridgeColdPreparationIsExplicitAndCannotUseTheRawCommandRoute(t *testin
 }
 
 func TestBridgeHasNoDAPOrCorePolicy(t *testing.T) {
-	source := readFile(t, filepath.Join(repositoryRoot(t), "bridge", "bridge.py"))
-	tokens := pythonCodeIdentifiers(source)
-
 	forbiddenDAP := map[string]struct{}{
 		"variablesreference": {}, "frameid": {}, "stackframe": {}, "stacktrace": {},
 		"scopes": {}, "variables": {}, "evaluate": {}, "setbreakpoints": {},
@@ -329,13 +326,16 @@ func TestBridgeHasNoDAPOrCorePolicy(t *testing.T) {
 		"breakpointlocations": {}, "readmemory": {}, "writememory": {},
 		"exceptioninfo": {}, "configurationdone": {},
 	}
-	for token := range tokens {
-		if _, forbidden := forbiddenDAP[token]; forbidden {
-			t.Errorf("bridge.py contains DAP-policy identifier %q", token)
-		}
-		if strings.Contains(token, "retry") || strings.Contains(token, "statemachine") || strings.Contains(token, "sourcerewrite") ||
-			strings.Contains(token, "handlealloc") || strings.Contains(token, "allochandle") || strings.Contains(token, "handleallocator") {
-			t.Errorf("bridge.py contains core-policy identifier %q", token)
+	for _, name := range []string{"bridge.py", "mbp_wire.py"} {
+		source := readFile(t, filepath.Join(repositoryRoot(t), "bridge", name))
+		for token := range pythonCodeIdentifiers(source) {
+			if _, forbidden := forbiddenDAP[token]; forbidden {
+				t.Errorf("%s contains DAP-policy identifier %q", name, token)
+			}
+			if strings.Contains(token, "retry") || strings.Contains(token, "statemachine") || strings.Contains(token, "sourcerewrite") ||
+				strings.Contains(token, "handlealloc") || strings.Contains(token, "allochandle") || strings.Contains(token, "handleallocator") {
+				t.Errorf("%s contains core-policy identifier %q", name, token)
+			}
 		}
 	}
 }
