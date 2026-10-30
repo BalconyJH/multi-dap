@@ -23,6 +23,8 @@ nav = [
   { "Integration evidence" = [
     { "M0 hardware findings" = "m0-findings.md" },
     { "MULTI API notes" = "multi-api-notes.md" },
+    { "MULTI 8 adaptation study" = "ghs-8-adaptation.md" },
+    { "MULTI 8 implementation and acceptance" = "ghs-8-implementation.md" },
     { "Windows packaging and editors" = "m6-packaging-and-editors.md" },
   ] },
   { "Historical plans" = [

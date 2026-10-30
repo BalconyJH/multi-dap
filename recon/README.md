@@ -245,7 +245,9 @@ Execution calls require a stopped session, checkpoint state before and after eve
 issue a verified recovery halt. A halt restores execution state only; it cannot undo program-counter
 movement or target-side effects, so run them only on an operator-approved disposable test state.
 Memory/disassembly calls use the same stopped-state and recovery gates. The sole register command,
-`l r`, is already documented and M0-4 verified; its raw text is not written to evidence.
+`l r`, has historical M0-4 shape observations; its raw text is not written to evidence.
+That history does not qualify a MULTI 8 register-value format, per-core routing, or non-perturbing
+reads. The p05 register phase remains unexecuted, and production registers remain unsupported.
 
 Do not run either probe against the current cold `no_process` session. Until an existing program
 window passes the warm-binding gate, both probes should be expected to fail closed before touching
