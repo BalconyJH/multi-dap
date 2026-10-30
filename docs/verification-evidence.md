@@ -4,6 +4,137 @@ This index records sanitized, local verification evidence. Each section
 defines its own scope. It is an audit aid, not a claim that a public release,
 hosted workflow, or hardware qualification has occurred.
 
+## E2 reconnect and scripted DAP acceptance (2026-10-29)
+
+The operator authorized disconnect/reconnect and subsequently authorized
+connection-related halt/reset, but not download, erase/program, explicit run,
+or trace start/stop. The old E2 connection was disconnected serially; its
+target server and trace processes exited. A documented temporary connection
+with the selected server arguments restored communication through the
+retained MULTI instance. The original ELF was associated using
+`prepare_target -verify=none`, without a load request or memory verification.
+That association is not an independent image-integrity check.
+
+Two real response shapes exposed software defects and received narrow fixes:
+
+- MULTI 8.1.4 emitted a name-first component alias list. The parser now keeps
+  the complete display tail and marks its ambiguity instead of rejecting the
+  observed ordering. Suffix PID/core text never establishes identity; exact
+  routed `P` validation remains authoritative.
+- `print 1 + 1` returned the bare line `2`. Evaluation now accepts bounded
+  single-line decimal integers without numeric conversion or inferred
+  type/address/children. Locals, named values, and aggregate grammars are not
+  relaxed.
+
+Both changes have sanitized fixtures, negative tests, and independent security
+review. After the final fix, `go test ./...`, `go vet ./...`, and race tests for
+the multi, actor, daemon, DAP, and CLI packages passed.
+
+| Check | Observed result and boundary |
+|---|---|
+| Scripted warm DAP retest | All ten requests succeeded: initialize, attach, configurationDone, threads, local native status, stackTrace, scopes, variables, evaluate, and non-terminating disconnect. One configured Host core was inspected; empty locals at the reset location are not a general variables acceptance claim. |
+| Host timeline | A complete 3614-byte Chrome Trace JSON recorded ten completed requests, zero failed/unfinished requests, zero framing errors, and zero dropped events. Owner-only output ACL was checked. This is host observation, not target CPU profiling, real-editor acceptance, or an observer-overhead benchmark. |
+| Native source-selection evidence | A one-shot application launched through the explicitly routed MULTI `trace api` context recorded the vendor-supplied native session argument. It made no native API calls; successful argument delivery does not establish core/source binding. |
+| Integrated native capture | The selected-session `open` failed. Its reserved zero-byte file is invalid capture evidence. No packets were obtained and native open was not retried. |
+| Native failure isolation | Local status reported `faulted`, `needs_reconciliation:true`, helper abort requested, and native disconnect unconfirmed. Six subsequent local/status/ordinary DAP requests succeeded; no native reconnect or collection control was attempted. |
+| Init-only diagnostics | After normal daemon cleanup, a bounded owned subprocess loaded/initialized the real DLL and enumerated an empty session list. A separate saved-argument initialization attempt timed out and was reaped by its owned Job. Neither connected a native session or read packets. Argument replay is not equivalent to testing an actual MULTI-launched native application. |
+| Cleanup and target state | Both temporary test daemons were shut down through their authenticated configuration-bound control path. The original MULTI session and replacement E2 server remained. Both physical cores reported stopped at reset locations after the tests; earlier workload results cannot be reused after reconnect/reset. |
+
+The final host timeline SHA-256 is
+`cdadae53db035c9f0f74847c2c90b272f4fe3c8b52489f394b769428fd448b46`.
+Raw transcripts, connection configuration, native arguments, and artifacts
+remain in owner-restricted private storage outside the repository. No real
+native stream, target timing, RTOS/register, snapshot, or Profiler format
+qualification is claimed. The earlier full release/package acceptance below
+predates these two fixes; no new package publication occurred.
+
+## Selected E2 session preflight (2026-10-29, afternoon)
+
+The operator subsequently supplied a reference to an existing Release test
+session. Its connection files and primary ELF existed, and the ELF digest
+matched the referenced capture/build evidence. A new private warm-only test
+TOML passed the fresh executable's static `check`. The original connection
+file contains download-mode settings; these were not executed.
+
+Fresh process evidence identified the corresponding MULTI, service router,
+E2 target server, and trace server. A read-only command-socket `components`
+query confirmed the exact primary-ELF component. This resolves the missing
+configuration/session prerequisite from the earlier morning check, but does
+not establish a healthy target connection.
+
+The subsequent read-only CPU-status query returned
+`0x109: fatal err (USB communication error)` from the existing target server.
+Earlier component-state observations were not consistent enough to establish
+that both physical cores were stopped; the post-error target state is
+unconfirmed. The existing trace context reported collection enabled and no
+active retrieval/decoding, not evidence that this test started collection or
+that valid target packets were available.
+
+Target access stopped after the error. No warm/cold daemon acquisition,
+native DLL initialization, native connection/capture, or DAP feature test was
+attempted. No target halt/run/reset/download, reconnect, trace start/stop, or
+process termination was issued. The original four session processes remained
+present in the final passive inventory. Private configuration and raw
+preflight evidence were retained outside the repository; live feature
+acceptance is `NOT_RUN`, not a software failure or hardware pass.
+
+## E2 readiness check (2026-10-29)
+
+After the operator reported connecting an E2, two independent read-only
+investigations checked the runtime and known configuration locations. No
+debugger/control socket was opened and no vendor DLL was initialized.
+
+| Check | Result and scope |
+|---|---|
+| USB device | Windows enumerated Renesas E2 with status OK, driver service `E2usb`, and configuration-manager error code zero. This establishes host USB recognition, not a target connection or trace capability. |
+| Runtime ownership | Process/listener snapshots found no MULTI, TimeMachine, or multi-dap daemon. The default control directory had only historical terminal records, not an active daemon record. |
+| Configuration | All three known local scratch TOMLs failed the freshly built `check` command because their project/ELF inputs no longer existed. The current CLion project/settings supplied no GHS configuration. No stale configuration was repaired by guessing another project or image. |
+| Source binary | A fresh source build succeeded and matched the previously tested native-integration executable byte for byte. |
+| Static native ABI | Installed MULTI 8.1.4 inspection under its standalone Python 3.8.6 found the required exports, compatible 64-bit runtime, 64-byte info structure, and 32-byte packet structure. The result retained `dll_loaded:false` and `target_contacted:false`. |
+| Offline export smoke | The fresh executable normalized the existing explicitly synthetic fixture and wrote Chrome Trace output. This was a synthetic CLI check, not an E2 capture. |
+
+The live capture prerequisite was not satisfied: no selected, valid current
+project/configuration or attributable native session was available. No cold
+acquisition, target halt/run/reset/download, trace start/stop, or native
+session connection was attempted. Native and hardware qualification remain
+open; USB presence and offline export success do not close those gates.
+
+## Editor entry and remaining-contract recheck (2026-10-28)
+
+The source VS Code extension now accepts opt-in `perfOutput` and
+`perfMaxEvents` attach properties. Its original authenticated proxy path and
+default no-recording behavior are unchanged. Fourteen Node host tests, lint,
+and package-content checks passed. Independent review also checked both
+`path.posix` and `path.win32` semantics without claiming a real IDE session.
+A Go contract test ties the schema/runtime event ceiling to the actual
+recorder limit and rejects default capture settings.
+
+Synthetic scalar tests verify that character and integer displays remain
+opaque strings, including signed/hex text and values outside JavaScript's
+exact-integer range. They support the existing display-only behavior around
+the MULTI 8 char-bitfield change; they are not captured vendor bitfield output.
+
+The current 8.1.4 PDFs were rechecked directly and their source hashes recorded
+in the [adaptation study](ghs-8-adaptation.md). An older unversioned text cache
+initially suggested an RTOS command-availability contradiction; the direct
+PDF check disproved it before that claim was added to the study. The current
+reference does document non-GUI freeze-mode `osatasklist`, but not a stable
+task output/identity/core-routing contract. Snapshot options, version/license
+restrictions, and `regvalsave` were likewise checked against current PDFs,
+not inferred from a GUI view or an old extract.
+
+Full local release acceptance was repeated after these changes: all 20 steps
+passed, with no skips. The Windows archive hash remained the value recorded
+below; the source-only VS Code extension is not a Windows ZIP payload.
+No actual IDE capture, vendor DLL initialization, native session connection,
+or target operation was performed.
+
+The outstanding qualification work still requires operator-selected inputs:
+an authorized TOML/native session for runtime checks, actual Profiler and
+snapshot artifacts with provenance, and RTOS/register fixtures from the
+intended mode/target. Documentation, synthetic tests, and existing files do
+not supply that authorization or replace those observations.
+
 ## Native DAP integration (2026-10-28, uncommitted worktree)
 
 The actor/helper/DAP integration adds production wiring to the earlier offline
