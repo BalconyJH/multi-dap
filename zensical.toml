@@ -14,6 +14,7 @@ nav = [
   { "Architecture" = "architecture.md" },
   { "Capabilities and status" = "capabilities.md" },
   { "Performance timeline" = "performance.md" },
+  { "Native performance analysis" = "native-analysis.md" },
   { "Operations" = "operations.md" },
   { "Development" = "development.md" },
   { "Windows distribution" = "distribution.md" },
