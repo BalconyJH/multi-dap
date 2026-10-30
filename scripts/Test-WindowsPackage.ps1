@@ -23,6 +23,8 @@ function Assert-PackageArchive {
         'SHA256SUMS.txt',
         'THIRD_PARTY_NOTICES.md',
         'bridge/bridge.py',
+        'bridge/timemachine_helper.py',
+        'bridge/timemachine_native.py',
         'editors/clion/README.md',
         'editors/clion/profile-contract.json',
         'examples/multi-dap.example.toml',
@@ -69,6 +71,11 @@ function Assert-PackageArchive {
         foreach ($requiredText in @('Cidr DAP CMake Debug', '<your-cmake-application>', 'proxy --config "<absolute-project.toml>"', '[probe].id', 'Debug (bug icon)', 'multi-dap ensure', '--bridge-script "<absolute-path-to-bridge.py>"', 'Hardware validation checklist')) {
             if ($readmeText.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
                 throw "package README is missing CLion integration contract: $requiredText"
+            }
+        }
+        foreach ($requiredText in @('timemachine_helper.py', 'timemachine_native.py', 'Python 3.8+', 'same directory as the selected', 'does not require pip')) {
+            if ($readmeText.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
+                throw "package README is missing the native trace packaging contract: $requiredText"
             }
         }
 
