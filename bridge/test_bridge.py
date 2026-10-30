@@ -12,6 +12,7 @@ import types
 import unittest
 
 from bridge.bridge import BoundedNDJSONReader, BridgeError, MAX_CONSOLE_OUTPUT_BYTES, MAX_CONSOLE_PANE_BYTES, MAX_DISASSEMBLE_BYTES, MBPServer, MultiBridge, decode_frame, encode_frame, validate_rpc_host
+from bridge.bridge import as_unicode, json_value, multi_text
 
 
 class FakeWindow(object):
@@ -666,6 +667,67 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         os.unlink(ready_file)
         os.rmdir(temporary)
+
+
+class WireMechanismTest(unittest.TestCase):
+    class Chunks(object):
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+
+        def recv(self, size):
+            if not self.chunks:
+                return b""
+            chunk = self.chunks.pop(0)
+            if len(chunk) > size:
+                self.chunks.insert(0, chunk[size:])
+            return chunk[:size]
+
+    def reader(self, chunks, limit=8):
+        return BoundedNDJSONReader(self.Chunks(chunks), limit)
+
+    def test_segmented_frames_crlf_and_exact_limit(self):
+        for chunks in (
+                [b"12345678\r\n{}\n"],
+                [b"12345678", b"\r", b"\n", b"{", b"}", b"\n"],
+                [b"12345678\r", b"\n{}\n"]):
+            reader = self.reader(chunks)
+            self.assertEqual(b"12345678", reader.read())
+            self.assertEqual(b"{}", reader.read())
+            self.assertIsNone(reader.read())
+
+    def test_oversized_and_incomplete_frames_fail_closed(self):
+        for chunks in (
+                [b"123456789\n"],
+                [b"12345678", b"x"],
+                [b"12345678\r", b"x\n"],
+                [b"12345678\r"],
+                [b"{}"],
+                [b"\xc3"]):
+            with self.assertRaises(BridgeError) as raised:
+                self.reader(chunks).read()
+            self.assertEqual("protocol_error", raised.exception.kind)
+
+    def test_utf8_objects_roundtrip_and_reject_invalid_wire(self):
+        frame = {u"text": u"\u4e2d\u00e9", u"count": 18446744073709551615}
+        self.assertEqual(frame, decode_frame(encode_frame(frame)[:-1]))
+        for line in (b"\xff", b"{", b"[]", b"null", b"42"):
+            with self.assertRaises(BridgeError) as raised:
+                decode_frame(line)
+            self.assertEqual("protocol_error", raised.exception.kind)
+        self.assertEqual(u"\u00e9", as_unicode(b"\xc3\xa9"))
+        with self.assertRaises(UnicodeDecodeError):
+            as_unicode(b"\xff")
+        with self.assertRaises(BridgeError):
+            as_unicode(42)
+
+    def test_recursive_conversion_preserves_scalars_and_lossiness(self):
+        value, lossy = json_value({b"\xff": [b"\xc3\xa9", (b"\xfe", None, True, 42)]})
+        self.assertTrue(lossy)
+        self.assertEqual({u"\ufffd": [u"\u00e9", [u"\ufffd", None, True, 42]]}, value)
+        self.assertEqual((u"", False), multi_text(None))
+        self.assertEqual((u"42", False), multi_text(42))
+        self.assertEqual(({u"plain": [False, 0, 1.25]}, False),
+                         json_value({b"plain": [False, 0, 1.25]}))
 
 
 class WireLoadingTest(unittest.TestCase):

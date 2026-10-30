@@ -120,7 +120,10 @@ class BoundedNDJSONReader(object):
                 if len(line) > self.max_message_size:
                     raise BridgeError("protocol_error", "frame exceeds max_message_size")
                 return line
-            if len(self.buffer) > self.max_message_size:
+            # One trailing CR may be the first half of a split CRLF delimiter.
+            pending_cr = (len(self.buffer) == self.max_message_size + 1 and
+                          self.buffer.endswith(b"\r"))
+            if len(self.buffer) > self.max_message_size and not pending_cr:
                 raise BridgeError("protocol_error", "frame exceeds max_message_size")
             chunk = self.connection.recv(4096)
             if not chunk:
@@ -128,5 +131,3 @@ class BoundedNDJSONReader(object):
                     raise BridgeError("protocol_error", "frame is not terminated by newline")
                 return None
             self.buffer += chunk
-            if len(self.buffer) > self.max_message_size and b"\n" not in self.buffer:
-                raise BridgeError("protocol_error", "frame exceeds max_message_size")
