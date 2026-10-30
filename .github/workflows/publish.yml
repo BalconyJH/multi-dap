@@ -179,6 +179,8 @@ jobs:
             'SHA256SUMS.txt'
             'THIRD_PARTY_NOTICES.md'
             'bridge/bridge.py'
+            'bridge/timemachine_helper.py'
+            'bridge/timemachine_native.py'
             'editors/clion/README.md'
             'editors/clion/profile-contract.json'
             'examples/multi-dap.example.toml'
@@ -201,6 +203,8 @@ jobs:
           cmp packaging/README.md extracted/README.md
           cmp THIRD_PARTY_NOTICES.md extracted/THIRD_PARTY_NOTICES.md
           cmp bridge/bridge.py extracted/bridge/bridge.py
+          cmp bridge/timemachine_helper.py extracted/bridge/timemachine_helper.py
+          cmp bridge/timemachine_native.py extracted/bridge/timemachine_native.py
           cmp editors/clion/README.md extracted/editors/clion/README.md
           cmp editors/clion/profile-contract.json extracted/editors/clion/profile-contract.json
           cmp multi-dap.example.toml extracted/examples/multi-dap.example.toml

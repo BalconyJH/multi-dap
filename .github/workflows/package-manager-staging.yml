@@ -182,6 +182,8 @@ jobs:
             'SHA256SUMS.txt'
             'THIRD_PARTY_NOTICES.md'
             'bridge/bridge.py'
+            'bridge/timemachine_helper.py'
+            'bridge/timemachine_native.py'
             'editors/clion/README.md'
             'editors/clion/profile-contract.json'
             'examples/multi-dap.example.toml'
@@ -204,6 +206,8 @@ jobs:
           cmp packaging/README.md extracted/README.md
           cmp THIRD_PARTY_NOTICES.md extracted/THIRD_PARTY_NOTICES.md
           cmp bridge/bridge.py extracted/bridge/bridge.py
+          cmp bridge/timemachine_helper.py extracted/bridge/timemachine_helper.py
+          cmp bridge/timemachine_native.py extracted/bridge/timemachine_native.py
           cmp editors/clion/README.md extracted/editors/clion/README.md
           cmp editors/clion/profile-contract.json extracted/editors/clion/profile-contract.json
           cmp multi-dap.example.toml extracted/examples/multi-dap.example.toml
@@ -383,16 +387,19 @@ jobs:
             }
             $installedExecutable = $linkTarget.FullName
           }
-          $installedBridge = Join-Path (Split-Path -Parent $installedExecutable) 'bridge\bridge.py'
+          $installedRoot = Split-Path -Parent $installedExecutable
           $expectedRoot = (Resolve-Path -LiteralPath .\expected-payload).Path
-          $expectedBridge = Join-Path $expectedRoot 'bridge\bridge.py'
-          if (-not (Test-Path -LiteralPath $installedBridge -PathType Leaf)) {
-            throw 'WinGet installed the executable without its required bridge/bridge.py companion.'
-          }
-          $installedBridgeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedBridge).Hash
-          $expectedBridgeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $expectedBridge).Hash
-          if ($installedBridgeHash -cne $expectedBridgeHash) {
-            throw 'The WinGet-installed bridge differs from the verified release archive.'
+          foreach ($companion in @('bridge\bridge.py', 'bridge\timemachine_helper.py', 'bridge\timemachine_native.py')) {
+            $installedCompanion = Join-Path $installedRoot $companion
+            $expectedCompanion = Join-Path $expectedRoot $companion
+            if (-not (Test-Path -LiteralPath $installedCompanion -PathType Leaf)) {
+              throw "WinGet installed the executable without its required companion: $companion"
+            }
+            $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedCompanion).Hash
+            $expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $expectedCompanion).Hash
+            if ($installedHash -cne $expectedHash) {
+              throw "The WinGet-installed companion differs from the verified release archive: $companion"
+            }
           }
           $metadata = & multi-dap version | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $metadata.version -cne $env:EXPECTED_VERSION) {
