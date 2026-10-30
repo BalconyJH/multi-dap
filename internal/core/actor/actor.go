@@ -240,8 +240,11 @@ type runtime struct {
 	inflight          *inflight
 	nextToken         uint64
 	controlGeneration uint64
-	traceBlocked      bool
-	traceBlockReason  string
+	// Execution acceptance does not establish target state. A stopped-only
+	// operation must obtain a new observation after any dispatched execution.
+	executionNeedsObservation bool
+	traceBlocked              bool
+	traceBlockReason          string
 
 	opened  bool
 	opening bool
@@ -723,6 +726,9 @@ func (r *runtime) startNext() {
 	for r.inflight == nil && len(r.pending) != 0 && !r.closing && !r.faulted {
 		work := r.pending[0]
 		r.pending = r.pending[1:]
+		if r.executionNeedsObservation && (work.kind == opBreakpoints || work.kind == opBreakpointCleanup || work.kind == opInspection) {
+			work = r.refreshStoppedWork(work)
+		}
 		if work.expectedGeneration != 0 && r.executor.Generation() != work.expectedGeneration {
 			work.done(r, nil, ErrBridgeStaleCompletion)
 			continue
@@ -734,6 +740,9 @@ func (r *runtime) startNext() {
 			}
 		}
 		r.nextToken++
+		if work.kind == opExecution {
+			r.executionNeedsObservation = true
+		}
 		in := &inflight{token: r.nextToken, work: work}
 		if work.isolated != nil {
 			parent := work.parent
@@ -878,6 +887,24 @@ func (r *runtime) defersBootstrapFault(kind opKind) bool {
 }
 
 func (r *runtime) enqueue(work rpcWork) { r.pending = append(r.pending, work) }
+
+func (r *runtime) refreshStoppedWork(waiting rpcWork) rpcWork {
+	work := r.stateWork(nil, nil)
+	observe := work.done
+	work.done = func(current *runtime, value any, err error) {
+		observe(current, value, err)
+		if err != nil {
+			waiting.done(current, nil, err)
+		} else if current.faulted {
+			waiting.done(current, nil, ErrReconciliationNeeded)
+		} else if current.executionNeedsObservation {
+			waiting.done(current, nil, ErrInspectionStale)
+		} else {
+			current.pending = append([]rpcWork{waiting}, current.pending...)
+		}
+	}
+	return work
+}
 
 func (r *runtime) hasStateWork() bool {
 	if r.inflight != nil && r.inflight.work.kind == opState {
@@ -1186,6 +1213,11 @@ func (r *runtime) observe(evidence stateEvidence) error {
 		}
 		return err
 	}
+	// Lifecycle-only statuses retain the prior reducer snapshot; they cannot
+	// revalidate that snapshot for stopped-only work after execution.
+	if state.Status.IsStopped() || state.Status.IsRunning() {
+		r.executionNeedsObservation = false
+	}
 	if result.Snapshot.Configuring {
 		// During configuration the reducer intentionally suppresses public
 		// state transitions. Invalidations remain observable because stale
@@ -1209,6 +1241,9 @@ func (r *runtime) maybeScheduleBreakpointCleanup(snapshot session.Snapshot, imme
 	if snapshot.State != session.TargetStopped || r.opts.BreakpointRunner == nil {
 		return
 	}
+	if r.executionNeedsObservation && !immediate {
+		return
+	}
 	epoch := uint64(snapshot.StopEpoch)
 	if immediate {
 		if r.cleanupImmediateEpoch == epoch {
@@ -1221,7 +1256,7 @@ func (r *runtime) maybeScheduleBreakpointCleanup(snapshot session.Snapshot, imme
 		}
 		r.cleanupNaturalEpoch = epoch
 	}
-	r.enqueue(r.breakpointCleanupWork())
+	r.enqueue(r.breakpointCleanupWork(epoch))
 }
 
 func (r *runtime) applyReducerActions(actions []session.Action, snapshot session.Snapshot, cause error) {
@@ -1541,7 +1576,7 @@ func (c executionCommand) apply(r *runtime) {
 		return
 	}
 	if len(r.threads) == 1 {
-		r.enqueue(r.singleCoreExecutionWork(c.request, c.reply))
+		r.enqueue(r.singleCoreExecutionWork(c.owner, c.request, c.reply))
 		return
 	}
 	if r.execution == nil {
@@ -1557,7 +1592,7 @@ func (c executionCommand) apply(r *runtime) {
 		respond(c.reply, ExecutionResult{}, err)
 		return
 	}
-	r.enqueue(r.executionDomainWork(multi.ExecutionRequest{Operation: c.request.Operation, Scope: scope}, c.reply))
+	r.enqueue(r.executionDomainWork(c.owner, multi.ExecutionRequest{Operation: c.request.Operation, Scope: scope}, c.reply))
 }
 
 func (r *runtime) hasConfiguredCore(coreID uint64) bool {
@@ -1633,8 +1668,31 @@ type detachSubscriptionCommand struct{ id uint64 }
 
 func (c detachSubscriptionCommand) apply(r *runtime) { r.detach(c.id) }
 
-func (r *runtime) singleCoreExecutionWork(request ExecutionRequest, reply chan reply[ExecutionResult]) rpcWork {
-	return rpcWork{kind: opExecution, run: func(ctx context.Context, client *bridge.Client) (any, error) {
+func (r *runtime) controlGuard(owner session.ControllerID) func(*runtime) error {
+	generation := r.controlGeneration
+	return func(current *runtime) error {
+		if generation != current.controlGeneration {
+			return session.ErrNotLeaseHolder
+		}
+		return current.reducer.RequireControl(owner)
+	}
+}
+
+func (r *runtime) executionGuard(owner session.ControllerID, operation multi.ExecutionOperation) func(*runtime) error {
+	control := r.controlGuard(owner)
+	return func(current *runtime) error {
+		if err := control(current); err != nil {
+			return err
+		}
+		if operation != multi.ExecutionPause {
+			return current.reducer.RequireResume(owner)
+		}
+		return nil
+	}
+}
+
+func (r *runtime) singleCoreExecutionWork(owner session.ControllerID, request ExecutionRequest, reply chan reply[ExecutionResult]) rpcWork {
+	return rpcWork{kind: opExecution, validate: r.executionGuard(owner, request.Operation), run: func(ctx context.Context, client *bridge.Client) (any, error) {
 		d, err := multi.NewDriver(client)
 		if err != nil {
 			return nil, err
@@ -1660,8 +1718,8 @@ func (r *runtime) singleCoreExecutionWork(request ExecutionRequest, reply chan r
 	}}
 }
 
-func (r *runtime) executionDomainWork(request multi.ExecutionRequest, reply chan reply[ExecutionResult]) rpcWork {
-	return rpcWork{kind: opExecution, run: func(ctx context.Context, client *bridge.Client) (any, error) {
+func (r *runtime) executionDomainWork(owner session.ControllerID, request multi.ExecutionRequest, reply chan reply[ExecutionResult]) rpcWork {
+	return rpcWork{kind: opExecution, validate: r.executionGuard(owner, request.Operation), run: func(ctx context.Context, client *bridge.Client) (any, error) {
 		d, err := multi.NewDriver(client)
 		if err != nil {
 			return nil, err

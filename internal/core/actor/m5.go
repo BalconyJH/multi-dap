@@ -175,7 +175,7 @@ func (r *runtime) m5DisassembleWork(stopEpoch uint64, core int, request Disassem
 
 func (r *runtime) sameStoppedEpoch(stopEpoch uint64) bool {
 	snapshot := r.reducer.Snapshot()
-	return snapshot.State == session.TargetStopped && uint64(snapshot.StopEpoch) == stopEpoch
+	return !r.executionNeedsObservation && snapshot.State == session.TargetStopped && uint64(snapshot.StopEpoch) == stopEpoch
 }
 
 func cloneInstructions(in []multi.Instruction) []multi.Instruction {

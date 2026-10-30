@@ -19,6 +19,7 @@ import (
 
 var (
 	ErrBreakpointsUnavailable = errors.New("actor: breakpoint placement is unavailable")
+	ErrBreakpointsNotStopped  = errors.New("actor: source breakpoint changes require a stopped target")
 	ErrSourceUnavailable      = errors.New("actor: source is unavailable on every core")
 	ErrSourceUncertain        = errors.New("actor: source resolution is uncertain")
 	ErrInspectionUnavailable  = errors.New("actor: inspection is unavailable")
@@ -209,6 +210,10 @@ func (c setBreakpointsCommand) apply(r *runtime) {
 		respond(c.reply, breakpoint.ReplaceResult{}, ErrBreakpointsUnavailable)
 		return
 	}
+	if r.reducer.Snapshot().State != session.TargetStopped {
+		respond(c.reply, breakpoint.ReplaceResult{}, ErrBreakpointsNotStopped)
+		return
+	}
 	lines := append([]int(nil), c.lines...)
 	// An empty DAP replacement only removes already owned physical breakpoints.
 	// Their core identities are retained in the Store, so resolving the source
@@ -244,7 +249,7 @@ func (c setBreakpointsCommand) apply(r *runtime) {
 }
 
 func (r *runtime) sourceResolutionWork(owner session.ControllerID, identity source.Identity, lines []int, coverage []source.Observation, expected map[int]struct{}, reply chan reply[breakpoint.ReplaceResult]) rpcWork {
-	return rpcWork{kind: opBreakpoints, run: func(ctx context.Context, client *bridge.Client) (any, error) {
+	return rpcWork{kind: opBreakpoints, validate: r.breakpointGuard(owner), run: func(ctx context.Context, client *bridge.Client) (any, error) {
 		observations, err := r.opts.SourceResolver.Resolve(ctx, client, identity)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrSourceUncertain, err)
@@ -367,7 +372,7 @@ func resolvedCores(observations []source.Observation) ([]int, error) {
 }
 
 func (r *runtime) breakpointWork(owner session.ControllerID, identity source.Identity, lines, cores []int, reply chan reply[breakpoint.ReplaceResult]) rpcWork {
-	return rpcWork{kind: opBreakpoints, run: func(ctx context.Context, client *bridge.Client) (any, error) {
+	return rpcWork{kind: opBreakpoints, validate: r.breakpointGuard(owner), run: func(ctx context.Context, client *bridge.Client) (any, error) {
 		placer := actorPlacer{runner: r.opts.BreakpointRunner, client: client}
 		return r.breakpoints.ReplaceForOwner(ctx, placer, breakpoint.Owner(owner), identity, lines, cores)
 	}, done: func(_ *runtime, value any, err error) {
@@ -384,8 +389,19 @@ func (r *runtime) breakpointWork(owner session.ControllerID, identity source.Ide
 	}}
 }
 
-func (r *runtime) breakpointCleanupWork() rpcWork {
-	return rpcWork{kind: opBreakpointCleanup, run: func(ctx context.Context, client *bridge.Client) (any, error) {
+func (r *runtime) breakpointGuard(owner session.ControllerID) func(*runtime) error {
+	control := r.controlGuard(owner)
+	stopped := r.stoppedEpochGuard(uint64(r.reducer.Snapshot().StopEpoch))
+	return func(current *runtime) error {
+		if err := control(current); err != nil {
+			return err
+		}
+		return stopped(current)
+	}
+}
+
+func (r *runtime) breakpointCleanupWork(stopEpoch uint64) rpcWork {
+	return rpcWork{kind: opBreakpointCleanup, validate: r.stoppedEpochGuard(stopEpoch), run: func(ctx context.Context, client *bridge.Client) (any, error) {
 		placer := actorPlacer{runner: r.opts.BreakpointRunner, client: client}
 		return r.breakpoints.CleanupPending(ctx, placer)
 	}, done: func(_ *runtime, _ any, _ error) {
