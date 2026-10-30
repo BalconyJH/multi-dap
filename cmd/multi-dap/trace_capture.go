@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,6 +22,7 @@ const traceCaptureMaxMessages = 128
 
 type traceCaptureOptions struct {
 	config, controlDir, output string
+	captureID                  string
 	open                       dap.NativeTraceOpenArguments
 	start                      uint64
 	count                      int
@@ -53,12 +55,19 @@ func (e *traceCaptureError) Error() string {
 func (e *traceCaptureError) Unwrap() error { return e.cause }
 
 func traceCaptureFlags(args []string) (traceCaptureOptions, error) {
+	return parseTraceCaptureFlags(args, false)
+}
+
+func parseTraceCaptureFlags(args []string, editor bool) (traceCaptureOptions, error) {
 	var options traceCaptureOptions
 	flags := flag.NewFlagSet("trace capture", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&options.config, "config", "", "existing daemon's project configuration")
 	flags.StringVar(&options.controlDir, "control-dir", "", "private daemon control directory")
 	flags.StringVar(&options.output, "output", "", "new absolute private capture path")
+	if editor {
+		flags.StringVar(&options.captureID, "capture-id", "", "editor capture generation identity")
+	}
 	flags.StringVar(&options.open.SourceKind, "source-kind", "live", "declared source kind: live or snapshot")
 	flags.StringVar(&options.open.SourceID, "source-id", "", "operator-declared source identity")
 	flags.StringVar(&options.open.ImageSHA256, "image-sha256", "", "optional declared image digest")
@@ -70,6 +79,12 @@ func traceCaptureFlags(args []string) (traceCaptureOptions, error) {
 	flags.IntVar(&options.count, "count", dap.MaxNativeTracePackets, "maximum packets in this single batch")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return options, usageError("invalid trace capture options")
+	}
+	if editor {
+		_, err := hex.DecodeString(options.captureID)
+		if err != nil || len(options.captureID) != 32 || strings.ToLower(options.captureID) != options.captureID {
+			return options, usageError("trace capture-editor requires a 32-character lowercase hexadecimal --capture-id")
+		}
 	}
 	if strings.TrimSpace(options.config) == "" {
 		return options, usageError("trace capture requires --config for an already-running daemon")

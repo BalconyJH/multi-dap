@@ -232,9 +232,49 @@ prove the program/core binding.
 
 Successful requests return `{status, batch?, receipt}`; local `status` returns
 `{status}`. `read`'s `batch` is the `multi-dap.native-capture.v1` object accepted
-by `trace normalize`. A DAP client must store that explicit private artifact
-itself; these requests accept no output path or executable path.
-There is not yet an editor capture button.
+by `trace normalize`. These requests accept no output path or executable path.
+The VS Code command below stores the explicit private artifact through a local
+Go helper while retaining the existing frontend.
+
+### Capture from an active VS Code session
+
+The source extension provides **Capture Existing Native Trace** and **Inspect Native
+Trace Status** commands. Capture requires an active, configured `multi-dap`
+session whose adapter advertised the experimental native requests.
+
+Choose the source kind and exact native session ID, provide an operator source
+label and any provenance, select one bounded packet interval, acknowledge the
+unverified source association, and choose a new local output file. A snapshot
+must already be loaded in MULTI and needs its SHA-256 declaration. Session IDs
+are not DAP thread IDs, process IDs, core numbers, or TCP ports; the command
+does not discover or guess them.
+
+The extension forwards only native status/open/poll/read/close requests through
+that same DebugSession. A local `trace capture-editor` helper performs static
+configuration checks, reserves an exclusive private file with the normal
+Windows ACL policy, validates the typed capture, and writes only after confirmed
+native close and terminal IPC EOF validation. Its configuration does not select a second frontend or prove a
+different daemon identity: authority remains with the active editor session.
+JavaScript preserves the native generation/index decimal strings without
+rounding them through floating-point numbers.
+
+No second DAP connection, daemon acquisition, collection start/stop, snapshot
+load, target execution, or target preparation is performed. Ordinary debugging
+stays attached after a successful capture.
+
+VS Code cannot cancel an already sent `customRequest`. Cancellation, timeout,
+session replacement, or a helper failure therefore fences late responses.
+When a native operation was attempted without confirmed disconnect, that
+session retains a reconciliation requirement and cannot blindly start another
+capture. Inspect Native Trace Status reports bounded local status; an unresolved
+request or uncertain native state cannot be cleared by simply clicking Capture
+again. The extension never disconnects the whole debug session or stops
+collection as implicit recovery. Failure may leave a reserved or incomplete
+private output, without a success receipt.
+
+This editor path is software-only. A successful synthetic editor test does not
+qualify actual native sessions, source/core matching, snapshot loading/licensing,
+or target behavior.
 
 ### Capture one existing packet interval
 

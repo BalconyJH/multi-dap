@@ -19,7 +19,7 @@ func runTrace(ctx context.Context, args []string, stdout io.Writer) error {
 		return runTraceCapture(ctx, args[1:], stdout)
 	}
 	if len(args) == 0 || args[0] != "normalize" {
-		return usageError("trace requires the capture or normalize subcommand")
+		return usageError("trace requires the capture, capture-editor, or normalize subcommand")
 	}
 	flags := flag.NewFlagSet("trace normalize", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
