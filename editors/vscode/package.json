@@ -43,6 +43,24 @@
                 "type": "string",
                 "description": "Optional absolute path to multi-dap's private control-record directory."
               },
+              "acquisition": {
+                "type": "string",
+                "enum": [
+                  "cold",
+                  "warm"
+                ],
+                "description": "Optional explicit daemon bootstrap through ensure before attaching. Cold creates a new session when no matching daemon exists; warm strictly reuses the selected existing MULTI session. Omission only attaches to an existing daemon."
+              },
+              "bridgeScript": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Absolute path after variable substitution to bridge.py; required when acquisition is selected."
+              },
+              "primaryElf": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Absolute exact primary ELF identity after variable substitution; required for warm acquisition and forbidden for cold acquisition."
+              },
               "perfOutput": {
                 "type": "string",
                 "minLength": 1,
@@ -57,6 +75,16 @@
               }
             },
             "dependencies": {
+              "acquisition": [
+                "bridgeScript"
+              ],
+              "bridgeScript": [
+                "acquisition"
+              ],
+              "primaryElf": [
+                "acquisition",
+                "bridgeScript"
+              ],
               "perfMaxEvents": [
                 "perfOutput"
               ]
@@ -99,5 +127,8 @@
   "publisher": "tacrolimus",
   "extensionKind": [
     "ui"
-  ]
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false
+  }
 }
