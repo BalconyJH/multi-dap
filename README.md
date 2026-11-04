@@ -46,8 +46,21 @@ disconnect-safety qualification remain open.
 - [GitHub release configuration](docs/github-configuration.md)
 - [Hardware findings](docs/m0-findings.md)
 
-The same material builds as a strict Zensical site from
-[`zensical.toml`](zensical.toml).
+The same material builds with [Zensical](https://github.com/zensical/zensical/releases),
+pinned to **0.0.73** in [`docs/pyproject.toml`](docs/pyproject.toml) and locked in
+[`docs/uv.lock`](docs/uv.lock). The native [`zensical.toml`](zensical.toml)
+configuration groups setup, usage, development, distribution, and evidence
+without changing page URLs.
+
+Run from the repository root with uv and Python 3.12:
+
+```powershell
+uv run --project docs --locked --python 3.12 zensical serve --dev-addr 127.0.0.1:8000
+```
+
+For the CI-equivalent build, replace `serve --dev-addr 127.0.0.1:8000` with
+`build --clean --strict`. See the [documentation workflow](docs/development.md#documentation)
+for authoring, offline checks, and framework upgrades.
 
 ## Distribution
 
