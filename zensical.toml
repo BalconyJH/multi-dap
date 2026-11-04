@@ -13,31 +13,39 @@ use_directory_urls = true
 
 nav = [
   { "Home" = "index.md" },
-  { "Get started" = "getting-started.md" },
-  { "Configure CLion" = "clion.md" },
-  { "Configure Zed" = "zed.md" },
-  { "Project configuration" = "configuration.md" },
-  { "Architecture" = "architecture.md" },
-  { "Capabilities and status" = "capabilities.md" },
-  { "Performance timeline" = "performance.md" },
-  { "Native performance analysis" = "native-analysis.md" },
-  { "Operations" = "operations.md" },
-  { "Development" = "development.md" },
-  { "Windows distribution" = "distribution.md" },
-  { "Verification evidence" = "verification-evidence.md" },
-  { "Release" = "releasing.md" },
-  { "Security" = "security.md" },
-  { "GitHub configuration" = "github-configuration.md" },
-  { "Integration evidence" = [
+  { "Get started" = [
+    { "Overview" = "getting-started.md" },
+    { "Configure CLion" = "clion.md" },
+    { "Configure Zed" = "zed.md" },
+    { "Project configuration" = "configuration.md" },
+  ] },
+  { "Use multi-dap" = [
+    { "Capabilities and status" = "capabilities.md" },
+    { "Performance timeline" = "performance.md" },
+    { "Native performance analysis" = "native-analysis.md" },
+    { "Operations" = "operations.md" },
+    { "Security" = "security.md" },
+  ] },
+  { "Develop" = [
+    { "Developer guide" = "development.md" },
+    { "Architecture" = "architecture.md" },
+  ] },
+  { "Distribute" = [
+    { "Windows distribution" = "distribution.md" },
+    { "Release" = "releasing.md" },
+    { "GitHub configuration" = "github-configuration.md" },
+  ] },
+  { "Evidence" = [
+    { "Verification evidence" = "verification-evidence.md" },
     { "M0 hardware findings" = "m0-findings.md" },
     { "MULTI API notes" = "multi-api-notes.md" },
     { "MULTI 8 adaptation study" = "ghs-8-adaptation.md" },
     { "MULTI 8 implementation and acceptance" = "ghs-8-implementation.md" },
     { "Windows packaging and editors" = "m6-packaging-and-editors.md" },
-  ] },
-  { "Historical plans" = [
-    { "M0 closure and M1 implementation" = "superpowers/plans/2026-08-18-m0-closure-and-m1-implementation.md" },
-    { "M0 reconnaissance and M1 skeleton" = "superpowers/plans/2026-08-18-m0-recon-and-m1-skeleton.md" },
+    { "Historical plans" = [
+      { "M0 closure and M1 implementation" = "superpowers/plans/2026-08-18-m0-closure-and-m1-implementation.md" },
+      { "M0 reconnaissance and M1 skeleton" = "superpowers/plans/2026-08-18-m0-recon-and-m1-skeleton.md" },
+    ] },
   ] },
 ]
 
