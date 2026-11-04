@@ -163,18 +163,89 @@ artifacts remain ignored and are not Windows daemon ZIP payloads.
 
 ## Documentation
 
-The documentation site uses the repository's strict Zensical configuration:
+The documentation site uses [Zensical](https://zensical.org/), pinned to
+**0.0.73**, with its native TOML configuration. It does not require a separate
+MkDocs configuration or a MkDocs plugin pipeline. Use uv and Python 3.12, and
+run the commands below from the repository root.
+
+| File or directory | Responsibility |
+|---|---|
+| `zensical.toml` | Site navigation, modern theme, Markdown extensions, and strict link/anchor validation. |
+| `docs/*.md` | Published guides and references; historical plans remain under `docs/superpowers/plans/`. |
+| `docs/pyproject.toml` | Exact Zensical dependency and supported host Python version. |
+| `docs/uv.lock` | Complete resolved documentation environment and distribution hashes. |
+| `docs/.venv/` and `site/` | Ignored local environment and generated site; neither is committed. |
+
+The docs project has `package = false`: it is a build environment, not an
+installable `multi-dap` Python package. Its local virtual environment, project
+file, and lockfile are excluded from the generated site.
+
+### Preview locally
+
+```powershell
+uv run --project docs --locked --python 3.12 zensical serve --dev-addr 127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:8000/`. The preview rebuilds when documentation changes;
+stop it with Ctrl+C. Keep it bound to loopback when inspecting private local
+edits. This starts only the documentation server, not the daemon, MULTI, or a
+target connection.
+
+### Build and validate
 
 ```powershell
 uv run --project docs --locked --python 3.12 zensical build --clean --strict
 ```
 
-`docs/uv.lock` pins the complete documentation environment; the docs project
-has `package = false` and is not an installable `multi-dap` Python package.
-Warnings, invalid links, and invalid anchors fail the documentation job. All
-repository text must remain English; examples may contain non-English Unicode
-only through ASCII escape sequences when a test explicitly verifies encoding
-behavior.
+This is the command used by CI and Windows release acceptance. It writes
+`site/`; warnings, invalid links, and invalid anchors fail the build. The
+`--clean` option clears the build cache. After changing exclusion rules, remove
+only the ignored generated `site/` directory before rebuilding: stale output
+from an older build must not be carried into publication.
+
+Once the locked Python environment and packages are cached, check without
+network access or implicit Python downloads:
+
+```powershell
+uv lock --project docs --check --offline --python 3.12 --no-python-downloads
+uv run --offline --no-python-downloads --project docs --locked --python 3.12 zensical build --clean --strict
+```
+
+An uncached dependency is an offline setup failure, not permission to replace
+the locked environment with an unpinned global installation.
+
+### Authoring rules
+
+- Edit Markdown sources, not generated HTML. Keep relative links within the
+  documentation tree and add published pages to `project.nav` in
+  `zensical.toml`.
+- Preserve existing file names and heading anchors when updating a page so
+  incoming links remain valid. Navigation groups do not change page URLs.
+- Use the configured admonitions, fenced code blocks, tabs, tables, and Mermaid
+  diagrams instead of introducing a second documentation framework.
+- Preview affected pages and check navigation, search, diagrams, and narrow
+  layouts after theme or framework changes.
+- Keep all repository text English. Examples may contain non-English Unicode
+  only through ASCII escape sequences when a test explicitly verifies encoding
+  behavior.
+
+### Upgrade Zensical
+
+Review the [upstream releases](https://github.com/zensical/zensical/releases)
+before changing the exact version in `docs/pyproject.toml`. The selected
+0.0.73 release was published on 2026-10-26 and checked on 2026-10-30.
+Regenerate the lockfile with uv instead of editing distribution hashes:
+
+```powershell
+uv lock --project docs --python 3.12 --upgrade-package zensical
+uv run --project docs --locked --python 3.12 zensical --version
+uv run --project docs --locked --python 3.12 zensical build --clean --strict
+```
+
+Review transitive dependency changes, preview the affected pages, and update
+the documented version alongside the dependency and lockfile. CI and release
+acceptance must continue to use `--locked`; neither should select the latest
+upstream version implicitly.
 
 ## Repository policy checks
 
