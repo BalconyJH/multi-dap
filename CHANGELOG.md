@@ -74,6 +74,14 @@ version is tagged.
 - Repository-local DAP and native MULTI socket workflows with operation-specific
   authorization, bounded response waits, and private evidence handling.
 
+### Changed
+
+- Update the Zensical documentation framework to 0.0.73 with a regenerated
+  dependency lockfile, grouped navigation that preserves page URLs, and
+  documented preview, strict-build, offline, and upgrade workflows. Build-only
+  project metadata and the local virtual environment are excluded from the
+  generated site.
+
 ### Fixed
 
 - Process-liveness checks reject IDs that exceed the operating system's PID
