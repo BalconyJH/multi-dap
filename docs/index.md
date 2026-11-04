@@ -33,7 +33,7 @@ explicit legacy fallback.
 
 ```mermaid
 flowchart LR
-    IDE["CLion or VS Code"] -->|DAP| daemon["multi-dap daemon<br/>Go"]
+    IDE["CLion, VS Code, or Zed"] -->|DAP| daemon["multi-dap daemon<br/>Go"]
     daemon -->|"MBP v1 over loopback"| bridge["bridge.py<br/>MULTI Python 3 (default)"]
     bridge --> multi["Green Hills MULTI"]
     multi --> probe["debug probe"]
@@ -51,6 +51,11 @@ or unsupported requests before bridge I/O.
   daemon.
 - [Configure CLion](clion.md) for the supported Cidr DAP Profile, Before
   Launch daemon preparation, cold/warm acquisition, and troubleshooting.
+- [VS Code integration](m6-packaging-and-editors.md#vs-code-local-proxy-extension)
+  for the local source extension, optional explicit acquisition, and its
+  software-only acceptance boundary.
+- [Configure Zed](zed.md) for the registered local Windows source extension
+  and its remaining GUI/target acceptance gates.
 - [Project configuration](configuration.md) for every TOML field, validation
   rule, semantic binding, and safe change procedure.
 - [Architecture](architecture.md) for component responsibilities, state
@@ -74,3 +79,7 @@ or unsupported requests before bridge I/O.
 The release archive and runtime are currently supported only on Windows amd64.
 The Go packages also compile and run host tests on non-Windows systems, but the
 MULTI launcher intentionally rejects those platforms.
+
+This site is built with Zensical. See the
+[documentation workflow](development.md#documentation) to preview it locally,
+run the same strict build as CI, or update the pinned framework.
