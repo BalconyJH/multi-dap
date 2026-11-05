@@ -17,7 +17,7 @@
 | `editors/` | VS Code and Zed source extensions, synthetic editor acceptance, and CLion configuration contract. |
 | `scripts/` | Deterministic packaging and release acceptance. |
 | `tools/` | Repository-language and release-changelog policy validators. |
-| `packaging/` | Files copied into the Windows release archive. |
+| `packaging/` | Windows archive inputs and the local uv wheel backend/launcher. |
 
 ## Platform tiers
 
@@ -61,6 +61,7 @@ Host tests run under Python 3.12 and fake the Green Hills modules:
 ```powershell
 uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest bridge.test_bridge bridge.test_timemachine_native bridge.test_timemachine_helper
 uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest discover -s recon/tests
+uv run --offline --no-python-downloads --no-project --python 3.12 -m unittest discover -s packaging/python/tests
 ```
 
 `bridge/mbp_wire.py` contains the shared Python 2/3 text conversion, MBP frame
@@ -73,6 +74,10 @@ in Go. Architectural policy checks cover both legacy-runtime files.
 
 These tests prove compatibility logic, framing, sanitization, parsing, and
 bounded behavior. They do not open MULTI or connect to hardware.
+
+The [uv tool distribution guide](uv-tool.md) covers the separate launcher,
+wheel construction and isolated installed-command smoke. Its Python does not
+replace MULTI's embedded bridge interpreter.
 
 `bridge/timemachine_native.py` and `bridge/timemachine_helper.py` are separate
 Python 3.8+ modules. Their tests use fake native functions; importing them,

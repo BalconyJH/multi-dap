@@ -1,6 +1,8 @@
 # Windows Distribution Guide
 
-`multi-dap` is distributed as a self-contained Windows amd64 ZIP. The bundle
+`multi-dap` is packaged as a self-contained Windows amd64 ZIP. A locally built
+[uv tool wheel](uv-tool.md) can also distribute that intact bundle with a
+Python launcher. The bundle
 contains the Go executable and its required `bridge/bridge.py` and
 `bridge/mbp_wire.py` companions; it
 does not include Green Hills MULTI, a target server, firmware, or a completed
@@ -13,7 +15,7 @@ project configuration.
 | Windows amd64 workstation with licensed Green Hills MULTI 8.1.4 | Supported distribution target | Python 3.8.6 is selected by default; Python 2.7 is an explicit fallback. Compiler 2024.1.4 / Probe 6.6.8 remains a separate toolchain installation. |
 | Windows arm64 or x86 | Unsupported | No release archive or hardware qualification is provided. |
 | macOS or Linux | Unsupported production runtime | Go host tests may run there, but the MULTI launcher rejects non-Windows execution. |
-| Python 3 and `uv` | Mixed role | MULTI 8's embedded Python 3.8.6 is the preferred production bridge runtime; `uv`'s Python 3 remains host-test/documentation tooling. |
+| Python 3 and `uv` | Separate launcher and bridge roles | The wheel launcher uses 64-bit Python 3.10+; MULTI 8's embedded Python 3.8.6 remains the preferred bridge runtime. Host tests/documentation use Python 3.12. |
 
 No public release has been issued yet. Package-manager commands below describe
 the intended post-publication interface, not a currently available package.

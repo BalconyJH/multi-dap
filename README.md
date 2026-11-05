@@ -64,6 +64,11 @@ for authoring, offline checks, and framework upgrades.
 
 ## Distribution
 
+For local `uv tool install`, build a Windows amd64 wheel that includes the
+native EXE and all bridge companions. The [uv tool guide](docs/uv-tool.md)
+describes the launcher design, offline build, installation and verification.
+No public Python package has been published.
+
 No public package has been published yet. The release pipeline produces a
 Windows amd64 ZIP, detached archive checksum, provenance attestation, and a
 validated WinGet manifest set. After an approved release is accepted into the
