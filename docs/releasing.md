@@ -71,8 +71,10 @@ produce the same archive digest.
 ## Automated pipeline
 
 The CI workflow separates Go, Python, editor, documentation, workflow-policy,
-live Go vulnerability, and packaging checks. The package job runs only after
-all focused checks pass. The same pinned `actionlint` and `govulncheck` tools
+live Go vulnerability, wheel, and packaging checks. `Windows uv wheel` verifies
+Python 3.10/3.12 build reproducibility and offline tool installation separately
+from full release acceptance. The package job runs only after all focused
+checks pass. The same pinned `actionlint` and `govulncheck` tools
 run again before a tagged candidate is accepted.
 
 The release workflow is tag-driven and has two security boundaries:

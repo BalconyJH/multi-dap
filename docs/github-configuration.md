@@ -54,7 +54,7 @@ Protect the default branch with:
 - blocked force pushes and deletion;
 - a narrowly controlled bypass list.
 
-Require these eleven CI checks after their first successful hosted run records
+Require these twelve CI checks after their first successful hosted run records
 the exact names:
 
 - `Go (ubuntu-24.04)`;
@@ -67,6 +67,7 @@ the exact names:
 - `Documentation`;
 - `Go vulnerability audit`;
 - `GitHub Actions policy`;
+- `Windows uv wheel`;
 - `Windows release candidate`.
 
 Do not enable merge queue unless CI is extended with a `merge_group` trigger
