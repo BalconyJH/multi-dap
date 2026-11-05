@@ -18,3 +18,4 @@ third_party/**/LICENSE text eol=lf
 *.exe binary
 *.pyc binary
 *.zip binary
+*.whl binary

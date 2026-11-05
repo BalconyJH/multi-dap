@@ -1,0 +1,14 @@
+[build-system]
+requires = []
+build-backend = "wheel_backend"
+backend-path = ["."]
+
+[project]
+name = "multi-dap"
+dynamic = ["version"]
+description = "Windows launcher and bundled Green Hills MULTI DAP adapter"
+requires-python = ">=3.10"
+license = "MIT"
+
+[project.scripts]
+multi-dap = "multi_dap:main"
