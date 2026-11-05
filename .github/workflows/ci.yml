@@ -180,9 +180,82 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
+  wheel:
+    name: Windows uv wheel
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      WHEEL_VERSION: 0.0.0-ci.${{ github.run_number }}
+      WHEEL_COMMIT: ${{ github.sha }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.9"
+          enable-cache: false
+      - name: Prepare offline wheel dependencies
+        run: |
+          go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'Go dependency preparation failed.' }
+          uv python install 3.10 3.12
+          if ($LASTEXITCODE -ne 0) { throw 'Python preparation failed.' }
+      - name: Test launcher and backend on minimum supported Python
+        run: uv run --offline --no-python-downloads --no-project --python 3.10 -m unittest discover -s packaging/python/tests -v
+      - name: Build native bundle
+        run: |
+          New-Item -ItemType Directory -Path .\dist\wheel, .\dist\wheel-repro | Out-Null
+          .\scripts\New-WindowsPackage.ps1 `
+            -OutputDirectory .\dist\wheel `
+            -Version $env:WHEEL_VERSION `
+            -Commit $env:WHEEL_COMMIT `
+            -SourceDateEpoch 315532800
+      - name: Verify reproducible wheel builds across Python versions
+        run: |
+          $archive = (Resolve-Path -LiteralPath ".\dist\wheel\multi-dap-$env:WHEEL_VERSION-windows-amd64.zip").Path
+          uv build --wheel .\packaging\python --offline --no-python-downloads --python 3.10 --out-dir .\dist\wheel -C "archive=$archive"
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.10 wheel build failed.' }
+          uv build --wheel .\packaging\python --offline --no-python-downloads --python 3.12 --out-dir .\dist\wheel-repro -C "archive=$archive"
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 wheel build failed.' }
+          $first = @(Get-ChildItem -LiteralPath .\dist\wheel -Filter '*.whl' -File)
+          $second = @(Get-ChildItem -LiteralPath .\dist\wheel-repro -Filter '*.whl' -File)
+          if ($first.Count -ne 1 -or $second.Count -ne 1 -or $first[0].Name -cne $second[0].Name) {
+            throw 'Each build must produce exactly one identically named wheel.'
+          }
+          $firstHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $first[0].FullName).Hash
+          $secondHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $second[0].FullName).Hash
+          if ($firstHash -cne $secondHash) { throw 'Wheel builds are not byte-identical.' }
+          "WHEEL_PATH=$($first[0].FullName)" >> $env:GITHUB_ENV
+          Write-Output "Reproducible wheel SHA256: $firstHash"
+      - name: Verify offline install, CLI, reinstall and uninstall
+        run: |
+          foreach ($pythonVersion in @('3.10', '3.12')) {
+            uv run --offline --no-python-downloads --no-project --python $pythonVersion .\packaging\python\tests\smoke_install.py --wheel $env:WHEEL_PATH
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel smoke failed on Python $pythonVersion." }
+          }
+      - name: Verify wheel checks did not modify source
+        run: |
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the checked-out source state.' }
+          if ($changes.Count -ne 0) {
+            $changes
+            throw 'Wheel checks modified tracked or unignored source files.'
+          }
+
   package:
     name: Windows release candidate
-    needs: [go, python-host, vscode, zed, docs, go-vulnerability-audit, workflow-policy]
+    needs: [go, python-host, vscode, zed, docs, go-vulnerability-audit, workflow-policy, wheel]
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
