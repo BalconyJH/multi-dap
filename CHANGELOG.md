@@ -8,6 +8,13 @@ version is tagged.
 
 ### Added
 
+- A local Windows amd64 wheel for `uv tool install`, containing the verified
+  native ZIP payload and a transparent Python launcher. Offline builds preserve
+  the bundled EXE/bridge pair; isolated installation smoke checks exercise
+  CLI forwarding, reinstall, and uninstall without MULTI or target access.
+- An independent `Windows uv wheel` CI check for Python 3.10/3.12 build
+  reproducibility and offline install/reinstall/uninstall, required before
+  the Windows release candidate job can run.
 - Bounded, read-only Windows host-process diagnostics through
   `doctor --processes`, with explicit private-path opt-in and count-only startup
   notices. Process observations never establish ownership/probe availability
