@@ -72,6 +72,8 @@ jobs:
         run: uv run --no-project --no-python-downloads --python 3.12 -m unittest bridge.test_bridge bridge.test_timemachine_native bridge.test_timemachine_helper
       - name: Test the reconnaissance host surface
         run: uv run --no-project --no-python-downloads --python 3.12 -m unittest discover -s recon/tests
+      - name: Test wheel packaging and launcher
+        run: uv run --no-project --no-python-downloads --python 3.12 -m unittest discover -s packaging/python/tests
 
   vscode:
     name: VS Code extension
