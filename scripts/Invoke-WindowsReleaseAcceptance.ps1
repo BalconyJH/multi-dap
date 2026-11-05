@@ -556,6 +556,9 @@ try {
         Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'clippy', '--locked', '--offline', '--manifest-path', $zedManifest, '--all-targets', '--', '-D', 'warnings') -Description 'Zed extension lint'
         Invoke-NativeCommand -FilePath 'cargo' -Arguments @('+1.95.0', 'build', '--locked', '--offline', '--release', '--target', 'wasm32-wasip2', '--manifest-path', $zedManifest) -Description 'Zed Wasm extension build'
     }
+    Invoke-ReleaseStep -Results $results -Name 'python-wheel-host-tests' -Action {
+        Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'discover', '-s', 'packaging/python/tests') -Description 'wheel packaging and launcher host tests'
+    }
     Invoke-ReleaseStep -Results $results -Name 'repository-language-tests' -Action {
         Invoke-NativeCommand -FilePath 'uv' -Arguments @('run', '--offline', '--no-python-downloads', '--no-project', '--python', '3.12', '-m', 'unittest', 'tools.test_validate_repository_language') -Description 'repository language validator tests'
     }
