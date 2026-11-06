@@ -21,7 +21,11 @@ MIT is the repository and package-manager license. Never submit placeholder
 URLs or hashes.
 
 The generator emits the required multi-file manifest set using WinGet schema
-1.12.0. Validate the generated directory with the current Microsoft tooling,
+1.10.0, which supports all portable ZIP fields used here and works with the
+client on hosted Windows runners. Newer local clients can accept a schema
+that older clients cannot validate, so the structural test pins each header
+and `ManifestVersion` to this compatibility baseline. Validate the generated
+directory with Microsoft tooling,
 then submit it to `microsoft/winget-pkgs` through a reviewed pull request.
 
 - [Manifest authoring documentation](https://github.com/microsoft/winget-pkgs/tree/master/doc/manifest)

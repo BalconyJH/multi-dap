@@ -38,6 +38,11 @@ try {
         'Tacrolimus.multi-dap.locale.en-US.yaml',
         'Tacrolimus.multi-dap.yaml'
     )
+    $expectedTypes = @{
+        'Tacrolimus.multi-dap.installer.yaml' = 'installer'
+        'Tacrolimus.multi-dap.locale.en-US.yaml' = 'defaultLocale'
+        'Tacrolimus.multi-dap.yaml' = 'version'
+    }
     if (($files.Name -join "`n") -cne ($expectedNames -join "`n")) {
         throw "unexpected WinGet manifest set: $($files.Name -join ', ')"
     }
@@ -54,7 +59,7 @@ try {
             "InstallerUrl: '$url'",
             'InstallerSha256: 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF',
             'License: MIT',
-            'ManifestVersion: 1.12.0')) {
+            'ManifestVersion: 1.10.0')) {
         if ($allText.IndexOf($required, [System.StringComparison]::Ordinal) -lt 0) {
             throw "generated WinGet manifests are missing required text: $required"
         }
@@ -70,6 +75,16 @@ try {
         $text = [System.Text.Encoding]::UTF8.GetString($bytes)
         if ($text.Contains("`r") -or -not $text.EndsWith("`n", [System.StringComparison]::Ordinal)) {
             throw "WinGet manifest does not use normalized LF line endings: $($file.Name)"
+        }
+        # Newer local clients can accept schemas that hosted runners do not
+        # know. Check each header and body against the compatibility baseline.
+        $manifestType = $expectedTypes[$file.Name]
+        $expectedHeader = '# yaml-language-server: $schema=https://aka.ms/winget-manifest.' + $manifestType + '.1.10.0.schema.json'
+        $lines = $text.Split("`n")
+        if ($lines[0] -cne $expectedHeader -or
+            $lines -cnotcontains "ManifestType: $manifestType" -or
+            $lines -cnotcontains 'ManifestVersion: 1.10.0') {
+            throw "WinGet manifest must use a matching 1.10.0 schema header and body: $($file.Name)"
         }
     }
 
@@ -104,6 +119,10 @@ try {
 
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($null -ne $winget) {
+        & $winget.Source --version
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget version query failed with exit code $LASTEXITCODE"
+        }
         & $winget.Source validate --manifest $temporaryRoot
         if ($LASTEXITCODE -ne 0) {
             throw "winget validate failed with exit code $LASTEXITCODE"

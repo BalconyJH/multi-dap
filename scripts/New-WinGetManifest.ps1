@@ -77,17 +77,19 @@ $licenseUrl = "$repositoryUrl/blob/v$Version/LICENSE"
 $hash = $InstallerSha256.ToUpperInvariant()
 $baseName = $PackageIdentifier
 
+# Keep the schema compatible with the WinGet client on hosted Windows runners.
+# The portable ZIP fields used here are all supported by schema 1.10.0.
 $versionManifest = @"
-# yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
 PackageIdentifier: $PackageIdentifier
 PackageVersion: $Version
 DefaultLocale: en-US
 ManifestType: version
-ManifestVersion: 1.12.0
+ManifestVersion: 1.10.0
 "@
 
 $installerManifest = @"
-# yaml-language-server: `$schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
 PackageIdentifier: $PackageIdentifier
 PackageVersion: $Version
 InstallerType: zip
@@ -101,11 +103,11 @@ Installers:
     InstallerUrl: '$canonicalInstallerUrl'
     InstallerSha256: $hash
 ManifestType: installer
-ManifestVersion: 1.12.0
+ManifestVersion: 1.10.0
 "@
 
 $localeManifest = @"
-# yaml-language-server: `$schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
 PackageIdentifier: $PackageIdentifier
 PackageVersion: $Version
 PackageLocale: en-US
@@ -136,7 +138,7 @@ InstallationNotes: >-
   relative to its own location. Keep its required mbp_wire.py companion in that
   same directory.
 ManifestType: defaultLocale
-ManifestVersion: 1.12.0
+ManifestVersion: 1.10.0
 "@
 
 Write-ManifestFile -Path (Join-Path $output "$baseName.yaml") -Content $versionManifest

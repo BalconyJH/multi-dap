@@ -91,6 +91,9 @@ version is tagged.
 
 ### Fixed
 
+- WinGet manifest generation uses schema 1.10.0 consistently in each header
+  and body, avoiding schema-header warnings and failed release acceptance on
+  hosted Windows clients that do not understand schema 1.12.0.
 - Process-liveness checks reject IDs that exceed the operating system's PID
   width before invoking system APIs, retaining ambiguous startup reservations
   instead of probing a truncated PID or Unix process group.
